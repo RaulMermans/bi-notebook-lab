@@ -213,6 +213,41 @@ pre { overflow-x: auto; background: #181818; color: #f3f3f3; padding: 16px; bord
 .measure-trace-visualizer { border: 1px solid #ececea; border-radius: 10px; padding: 14px 16px; background: #fafaf8; }
 .measure-trace-visualizer h4 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: #74746f; }
 
+.notebook-score { text-align: right; }
+.notebook-score__label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #9d9d9d; }
+.notebook-score__value { font-size: 22px; font-weight: 700; }
+
+.test-cell-stale { color: #7a4b00; background: #fdf3e3; border: 1px solid #f3ddb0; border-radius: 8px; padding: 8px 12px; font-size: 13px; }
+
+.test-cell-score { margin-top: 14px; display: grid; gap: 10px; }
+.test-cell-score__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.test-cell-score__points { font-size: 22px; font-weight: 700; }
+.test-cell-score__badge { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; border-radius: 6px; padding: 4px 10px; }
+.test-cell-score__badge--pass { color: #0f5132; background: #d1f5df; }
+.test-cell-score__badge--fail { color: #7a1712; background: #fbdad7; }
+.test-cell-score__bar { height: 8px; border-radius: 999px; background: #ececea; overflow: hidden; }
+.test-cell-score__bar-fill { height: 100%; background: #171717; border-radius: 999px; }
+
+.test-rule-groups { display: grid; gap: 16px; }
+.test-rule-group__header { display: flex; justify-content: space-between; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: #74746f; margin-bottom: 6px; }
+.test-rule-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.test-rule { border: 1px solid #ececea; border-radius: 8px; overflow: hidden; }
+.test-rule__header { width: 100%; display: flex; align-items: center; gap: 10px; border: 0; background: #fff; padding: 8px 12px; cursor: pointer; text-align: left; font: inherit; }
+.test-rule__icon { font-weight: 700; width: 16px; text-align: center; }
+.test-rule__icon--passed { color: #0f5132; }
+.test-rule__icon--partial { color: #7a4b00; }
+.test-rule__icon--failed { color: #7a1712; }
+.test-rule__icon--error { color: #74746f; }
+.test-rule--passed { background: #f6fbf8; }
+.test-rule--partial { background: #fffaf0; }
+.test-rule--failed { background: #fdf6f6; }
+.test-rule--error { background: #f7f7f4; }
+.test-rule__title { flex: 1; font-size: 13px; }
+.test-rule__required-badge { margin-left: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: #7a1712; }
+.test-rule__points { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.test-rule__feedback { list-style: none; margin: 0; padding: 8px 12px 12px; display: grid; gap: 6px; }
+.test-rule__hint { margin-top: 4px; font-size: 12px; color: #74746f; }
+
 @media (max-width: 760px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { display: none; }

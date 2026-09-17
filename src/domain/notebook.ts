@@ -1,3 +1,5 @@
+import type { ValidationSpec } from './validation'
+
 export type CellStatus = 'idle' | 'running' | 'passed' | 'failed'
 
 export interface BaseNotebookCell {
@@ -46,12 +48,26 @@ export interface MeasureCell extends BaseNotebookCell {
 }
 
 /**
- * Cell kinds not yet backed by a runtime (Sprint 5+). Kept as one loose
+ * Runs one or more validation assertions against current notebook state —
+ * the Sprint 5 counterpart to `MeasureCell`/`CalculatedColumnCell`. Only
+ * the `ValidationSpec` (rules, targets, expected outcomes) is persisted;
+ * a run's score/feedback is always recomputed, never stored (see
+ * docs/VALIDATION_ENGINE.md "Persistence boundaries").
+ */
+export interface TestCell extends BaseNotebookCell {
+  kind: 'test'
+  modelId: string
+  prompt?: string
+  validation: ValidationSpec
+}
+
+/**
+ * Cell kinds not yet backed by a runtime (Phase 6+). Kept as one loose
  * shape rather than a fully-typed member per kind until each one gets a
  * real domain/execution contract (AGENTS.md: "New cell types require a
  * domain contract and execution contract first").
  */
-export type GenericCellKind = 'markdown' | 'visual' | 'question' | 'test'
+export type GenericCellKind = 'markdown' | 'visual' | 'question'
 
 export interface GenericNotebookCell extends BaseNotebookCell {
   kind: GenericCellKind
@@ -60,7 +76,7 @@ export interface GenericNotebookCell extends BaseNotebookCell {
   meta?: Record<string, unknown>
 }
 
-export type NotebookCell = DataCell | ModelCell | CalculatedColumnCell | MeasureCell | GenericNotebookCell
+export type NotebookCell = DataCell | ModelCell | CalculatedColumnCell | MeasureCell | TestCell | GenericNotebookCell
 export type CellKind = NotebookCell['kind']
 
 export interface NotebookDocument {

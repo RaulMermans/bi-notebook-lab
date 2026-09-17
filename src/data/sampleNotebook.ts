@@ -1,4 +1,15 @@
 import type { NotebookDocument } from '../domain/notebook'
+import type { ValidationSpec } from '../domain/validation'
+
+// Illustrative placeholder: mirrors the shape of a real ValidationSpec
+// (see src/data/exercises/retailFoundationsValidation.ts) without resolving
+// against any real model.
+const placeholderValidation: ValidationSpec = {
+  id: 'sample-validation',
+  title: 'Validation',
+  passingPercentage: 70,
+  rules: [],
+}
 
 export const sampleNotebook: NotebookDocument = {
   id: 'retail-foundations',
@@ -55,10 +66,13 @@ export const sampleNotebook: NotebookDocument = {
       status: 'idle',
     },
     {
+      // Illustrative placeholder: see note above — no real SemanticModel yet.
       id: 'test',
       kind: 'test',
       title: 'Validation',
+      modelId: 'sample-retail-model',
       prompt: 'The validation engine will check model structure and expected results.',
+      validation: placeholderValidation,
       status: 'idle',
     },
   ],

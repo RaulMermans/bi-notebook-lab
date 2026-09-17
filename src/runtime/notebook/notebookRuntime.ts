@@ -1,6 +1,7 @@
-import type { CalculatedColumnCell, GenericNotebookCell, MeasureCell, ModelCell, NotebookCell, NotebookDocument } from '../../domain/notebook'
+import type { CalculatedColumnCell, GenericNotebookCell, MeasureCell, ModelCell, NotebookCell, NotebookDocument, TestCell } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
 import type { CalculatedColumn, ColumnRef, Measure, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
+import type { ValidationSpec } from '../../domain/validation'
 import type { ExpressionDiagnostic } from '../../expression/diagnostics'
 import { generateId } from '../../lib/ids'
 import * as calculatedColumnRuntime from '../calculatedColumn/calculatedColumnRuntime'
@@ -340,5 +341,31 @@ export class NotebookRuntime {
     const cells = this.snapshot.notebook.cells.filter((c) => c.id !== cellId)
     const models = model ? { ...this.snapshot.models, [model.id]: measureRuntime.removeMeasure(model, cell.measureId) } : this.snapshot.models
     this.commit({ ...this.snapshot.notebook, cells }, this.snapshot.datasets, models)
+  }
+
+  /**
+   * Appends a `TestCell` referencing an existing model and a `ValidationSpec`
+   * — there is no exercise-authoring UI yet (Sprint 5 brief §35), so this is
+   * currently only used by the built-in "+ Add Retail checkpoint" action.
+   * Unlike calculated columns/measures there is no validation step: a
+   * `ValidationSpec` is just data, so any spec can be attached to any model.
+   */
+  createTestCell(modelId: string, validation: ValidationSpec, title?: string, prompt?: string): TestCell {
+    const cell: TestCell = {
+      id: generateId('cell'),
+      kind: 'test',
+      title: title ?? validation.title,
+      modelId,
+      prompt,
+      validation,
+      status: 'idle',
+    }
+    this.addCell(cell)
+    return cell
+  }
+
+  /** Removes a TestCell. A ValidationSpec has no separate persisted state to clean up — it lives entirely on the cell. */
+  removeTestCell(cellId: string): void {
+    this.removeCell(cellId)
   }
 }

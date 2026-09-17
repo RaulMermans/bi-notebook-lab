@@ -1,6 +1,7 @@
 import type { NotebookCell as NotebookCellModel } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
 import type { CalculatedColumn, ColumnRef, Measure, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
+import type { ValidationRun } from '../../domain/validation'
 import type { ExpressionDiagnostic } from '../../expression/diagnostics'
 import type { CalculatedColumnExecution } from '../../runtime/calculatedColumn/calculatedColumnRuntime'
 import type { MeasureExecution } from '../../runtime/measure/measureRuntime'
@@ -9,6 +10,7 @@ import { CalculatedColumnCellCard } from './CalculatedColumnCellCard'
 import { DataCellCard } from './DataCellCard'
 import { MeasureCellCard } from './MeasureCellCard'
 import { ModelCellCard } from './ModelCellCard'
+import { TestCellCard } from './TestCellCard'
 
 interface NotebookCellProps {
   cell: NotebookCellModel
@@ -37,6 +39,10 @@ interface NotebookCellProps {
     patch: { name?: string; expression?: string },
   ) => Promise<{ measure?: Measure; execution?: MeasureExecution; diagnostics: ExpressionDiagnostic[] }>
   onRemoveMeasureCell: (cellId: string) => void
+  currentValidationRuns: Record<string, ValidationRun>
+  staleTestCellIds: Set<string>
+  onRunValidation: (cellId: string) => void
+  onRemoveTestCell: (cellId: string) => void
 }
 
 /** Dispatches a notebook cell to its renderer. `data`, `model`, `calculated-column` and `measure` are functional so far. */
@@ -56,6 +62,10 @@ export function NotebookCell({
   onRemoveCalculatedColumnCell,
   onUpdateMeasure,
   onRemoveMeasureCell,
+  currentValidationRuns,
+  staleTestCellIds,
+  onRunValidation,
+  onRemoveTestCell,
 }: NotebookCellProps) {
   if (cell.kind === 'data') {
     const dataset = datasets[cell.datasetId]
@@ -102,6 +112,21 @@ export function NotebookCell({
         datasets={datasets}
         onUpdate={(patch) => onUpdateMeasure(cell.modelId, cell.measureId, patch)}
         onRemove={() => onRemoveMeasureCell(cell.id)}
+      />
+    )
+  }
+
+  if (cell.kind === 'test') {
+    const model = models[cell.modelId]
+    return (
+      <TestCellCard
+        cell={cell}
+        model={model}
+        datasets={datasets}
+        run={currentValidationRuns[cell.id]}
+        hasStaleRun={staleTestCellIds.has(cell.id)}
+        onRun={() => onRunValidation(cell.id)}
+        onRemove={() => onRemoveTestCell(cell.id)}
       />
     )
   }

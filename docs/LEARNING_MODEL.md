@@ -46,3 +46,16 @@ Questions:
 - Is the chosen measure reusable?
 
 The UI should expose these layers explicitly instead of collapsing them behind a report canvas.
+
+## Validation as feedback on these levels
+
+The Sprint 5 validation engine (see
+[`VALIDATION_ENGINE.md`](./VALIDATION_ENGINE.md)) grades a learner against
+these same layers rather than a single pass/fail: a `relationship`/
+`model-health` rule failure is Level 2 feedback ("which tables should
+relate?"), a `calculated-column-result` failure is Level 3 ("what does
+`RELATED` mean, and did you use it right?"), and a `measure-result` rule that
+passes unfiltered but fails under a filter context is Level 4/5 feedback
+("does your measure respond to the current filters?") — pointing the learner
+back at the specific mental model they haven't yet gotten right, instead of
+just reporting a score.

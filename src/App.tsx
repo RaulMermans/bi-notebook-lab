@@ -1,13 +1,47 @@
+import { useMemo, useState } from 'react'
+import { AddTestCellPanel } from './components/notebook/AddTestCellPanel'
 import { CreateCalculatedColumnPanel } from './components/notebook/CreateCalculatedColumnPanel'
 import { CreateMeasurePanel } from './components/notebook/CreateMeasurePanel'
 import { ImportDataPanel } from './components/notebook/ImportDataPanel'
 import { NotebookCell } from './components/notebook/NotebookCell'
+import type { ValidationRun } from './domain/validation'
+import { isValidationRunStale } from './runtime/validation/fingerprint'
+import { computeNotebookScore } from './runtime/validation/scoring'
+import { runValidation } from './runtime/validation/validationEngine'
 import { useNotebookRuntime } from './runtime/notebook/useNotebookRuntime'
 import './styles/app.css'
 
 export default function App() {
   const { notebook, datasets, models, status, actions } = useNotebookRuntime()
   const hasCells = notebook.cells.length > 0
+  const [validationRuns, setValidationRuns] = useState<Record<string, ValidationRun>>({})
+
+  const testCells = useMemo(() => notebook.cells.filter((cell) => cell.kind === 'test'), [notebook.cells])
+
+  const { currentRuns, staleTestCellIds } = useMemo(() => {
+    const current: Record<string, ValidationRun> = {}
+    const stale = new Set<string>()
+    for (const cell of testCells) {
+      const run = validationRuns[cell.id]
+      if (!run) continue
+      const model = models[cell.modelId]
+      if (model && !isValidationRunStale(run, model, datasets, cell.validation)) {
+        current[cell.id] = run
+      } else {
+        stale.add(cell.id)
+      }
+    }
+    return { currentRuns: current, staleTestCellIds: stale }
+  }, [testCells, validationRuns, models, datasets])
+
+  const notebookScore = useMemo(() => computeNotebookScore(Object.values(currentRuns)), [currentRuns])
+
+  function handleRunValidation(cellId: string) {
+    const cell = notebook.cells.find((c) => c.id === cellId)
+    if (!cell || cell.kind !== 'test') return
+    const run = runValidation({ datasets, models }, cell)
+    setValidationRuns((runs) => ({ ...runs, [cellId]: run }))
+  }
 
   return (
     <main className="app-shell">
@@ -28,6 +62,14 @@ export default function App() {
             <h1>{notebook.title}</h1>
             <p>Import a dataset, inspect its schema and profile, then keep building on it.</p>
           </div>
+          {testCells.length > 0 && Object.keys(currentRuns).length > 0 && (
+            <div className="notebook-score">
+              <span className="notebook-score__label">Notebook Score</span>
+              <span className="notebook-score__value">
+                {Math.round(notebookScore.pointsEarned * 10) / 10} / {notebookScore.pointsPossible}
+              </span>
+            </div>
+          )}
         </header>
 
         {status === 'loading' ? (
@@ -58,6 +100,10 @@ export default function App() {
                 onRemoveCalculatedColumnCell={actions.removeCalculatedColumnCell}
                 onUpdateMeasure={actions.updateMeasure}
                 onRemoveMeasureCell={actions.removeMeasureCell}
+                currentValidationRuns={currentRuns}
+                staleTestCellIds={staleTestCellIds}
+                onRunValidation={handleRunValidation}
+                onRemoveTestCell={actions.removeTestCell}
               />
             ))}
             <div className="notebook__add-actions">
@@ -67,6 +113,7 @@ export default function App() {
               </button>
               <CreateCalculatedColumnPanel models={models} datasets={datasets} onCreate={actions.createCalculatedColumnCell} />
               <CreateMeasurePanel models={models} datasets={datasets} onCreate={actions.createMeasureCell} />
+              <AddTestCellPanel models={models} onCreate={actions.createTestCell} />
             </div>
           </div>
         )}

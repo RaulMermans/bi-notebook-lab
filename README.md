@@ -42,8 +42,8 @@ The first product milestone is not a dashboard builder. It is a **learning runti
 ## Repository status
 
 Sprint 1 (Data Runtime), Sprint 2 (Semantic Model Runtime), Sprint 3
-(Calculated Columns & Row Context) and Sprint 4 (Measures & Filter
-Context) are complete. This repository now contains:
+(Calculated Columns & Row Context), Sprint 4 (Measures & Filter Context) and
+Sprint 5 (Validation Engine) are complete. This repository now contains:
 
 - product and architecture contracts
 - notebook/cell domain types as a discriminated union, including functional
@@ -74,6 +74,16 @@ Context) are complete. This repository now contains:
 - local persistence (IndexedDB) so a notebook, its datasets, its semantic
   models, and their calculated columns and measures all survive a reload,
   with pre-Sprint-4 models hydrating safely
+- a validation engine that grades a learner's real model, calculated columns
+  and measures — structural rules (relationships, model health), row/measure
+  result rules executed through the actual Sprint 3/4 runtimes across
+  multiple filter contexts (so a hardcoded constant measure can't pass), and
+  supplementary AST-level semantic checks — with weighted partial credit,
+  required-rule gating, and a staleness fingerprint so a stale PASS is never
+  shown as current
+- `TestCell`, a real notebook cell backed by a persisted `ValidationSpec`
+  (never a persisted score), and a built-in **Retail Foundations** checkpoint
+  scoring up to 100 points
 
 `CALCULATE`, `FILTER`, bidirectional/many-to-many relationships and time
 intelligence are **not** implemented yet — see
@@ -98,6 +108,11 @@ Use **+ New measure** to create `SUM(Sales[Revenue])`, `DISTINCTCOUNT(Sales[Orde
 or `DIVIDE([Total Revenue], [Orders])`, then expand the measure cell to add
 filters (e.g. `Customers[Country] = Spain`) and watch the result recompute
 with a full execution trace.
+
+Once you have a model, use **+ Add Retail checkpoint** to add the built-in
+scored checkpoint, then click **Check solution** to grade your model,
+`Margin` column, and measures against frozen expected results — including
+under several filter contexts, so a hardcoded number can't pass.
 
 ## Core documents
 

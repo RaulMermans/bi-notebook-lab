@@ -99,17 +99,41 @@ details.
 
 ---
 
-## Phase 5 — Validation Engine
+## Phase 5 — Validation Engine ✅ complete
 
-- expected model assertions
-- expected numeric results
-- tolerance rules
-- semantic expression checks
-- partial credit
-- feedback messages
-- notebook score
+- author selectors (`TableSelector`/`ColumnSelector`/`MeasureSelector`/
+  `CalculatedColumnSelector`) resolved fresh against the current model —
+  never generated runtime ids stored in an exercise
+- structural rules: relationship (direction + active state), model-health
+  (graph validity, star schema, forbidden diagnostics), table-present
+- expected numeric/row results, executed through the real Sprint 3/4
+  runtimes (`evaluateCalculatedColumn`/`evaluateMeasure`), never a
+  reimplemented calculation
+- explicit numeric tolerance (`absolute` / `relative` / `absolute-or-relative`,
+  default ±0.01 absolute or ±0.000001 relative) plus exact string/boolean/
+  null comparison
+- multi-context measure validation — the same measure checked across several
+  `FilterContext` fixtures, which is what actually catches a hardcoded
+  constant (a dedicated regression test proves this)
+- semantic expression checks (AST-level: uses-function, references-measure,
+  references-column, not-constant-only) as a supplementary rule type
+- weighted partial credit within a multi-case rule, plus required-rule
+  gating of the overall PASS
+- structured, separated learner feedback vs. internal evidence, with
+  context-aware hints (e.g. "your base result is correct, but it doesn't
+  respond to filter context")
+- a staleness fingerprint so a previous PASS is never shown as current after
+  a semantic edit (canvas repositioning is deliberately excluded)
+- `TestCell`, a real typed notebook cell; `ValidationSpec` persists on it,
+  `ValidationRun` never does
+- the Retail Foundations checkpoint (100 pts across Model/Calculated
+  column/Measures/Filter behavior), with a full correct solution scoring
+  100/100 and an intentionally broken one scoring less, verified both in
+  automated tests and manually in the running app
 
-**Exit:** exercises can be graded automatically without exact-string matching.
+**Exit:** exercises can be graded automatically without exact-string
+matching. See [`docs/VALIDATION_ENGINE.md`](./docs/VALIDATION_ENGINE.md) for
+implementation details.
 
 ---
 

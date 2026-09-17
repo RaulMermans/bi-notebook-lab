@@ -206,6 +206,67 @@ measure vs. calculated-column semantics, the measure-binding rules,
 supported aggregations, dependency/cycle detection, the filter-propagation
 algorithm, and execution traces.
 
+## Sprint 5 implementation (Validation Engine)
+
+```text
+domain/validation.ts         Author selectors (TableSelector/ColumnSelector/
+                              MeasureSelector/CalculatedColumnSelector),
+                              NumericTolerance, ValidationScalar,
+                              ValidationRule union (6 rule types),
+                              ValidationSpec, ValidationRun/ValidationRuleResult
+domain/notebook.ts            + TestCell (real cell kind, promoted out of
+                               GenericCellKind, mirroring Sprint 3/4's cells)
+
+runtime/validation/
+  selectorResolver.ts          author selector -> runtime entity, with
+                                structured VALIDATION_TARGET_NOT_FOUND /
+                                VALIDATION_TARGET_AMBIGUOUS diagnostics
+  scalarComparison.ts           tolerance-aware number/string/boolean/null
+                                 comparison
+  structuralValidation.ts       relationship / model-health / table-present
+                                 rules, over SemanticModel + graphAnalysis.ts
+  calculatedColumnValidation.ts row-level result rule, over
+                                 calculatedColumnRuntime.ts
+  measureValidation.ts          multi-context measure result rule, over
+                                 measureRuntime.ts; context-aware feedback
+  semanticValidation.ts         AST-level assertions, over expression/parser.ts
+  scoring.ts                    weighted partial credit, required-rule
+                                 gating, notebook-wide score
+  fingerprint.ts                staleness fingerprint (FNV-1a over semantic
+                                 model state, excluding canvas position)
+  validationEngine.ts           runValidation(): the single entry point,
+                                 dispatches each rule to its evaluator
+
+data/exercises/
+  retailFoundationsValidation.ts  the first real scored checkpoint (100 pts);
+                                   expected values derived independently from
+                                   generateRetailDataset()'s raw output
+
+components/notebook/
+  TestCellCard.tsx               score bar, PASS/NOT PASSED, per-rule
+                                  breakdown grouped by category, staleness
+                                  banner
+  AddTestCellPanel.tsx           the one predefined "+ Add Retail checkpoint"
+                                  creation path (no exercise-authoring UI yet)
+
+runtime/notebook/notebookRuntime.ts   + createTestCell / removeTestCell
+App.tsx                                owns the transient
+                                        `Record<testCellId, ValidationRun>`
+                                        map, derives which runs are current
+                                        (non-stale) via isValidationRunStale,
+                                        and shows the aggregate notebook score
+```
+
+Validation never introduces a second BI engine: every rule evaluator in
+`runtime/validation/` is a thin adapter that resolves an author selector
+against the current `SemanticModel`/`Dataset` registry, then calls the exact
+same `evaluateMeasure`/`evaluateCalculatedColumn`/`validateModel` functions
+Sprints 2–4 already built. See
+[`docs/VALIDATION_ENGINE.md`](./docs/VALIDATION_ENGINE.md) for the full
+selector-resolution, rule-contract, scoring, staleness, and persistence
+design — including the mandatory hardcoded-measure regression proof that
+motivates multi-context measure validation in the first place.
+
 ## Expression strategy
 
 Do not implement full DAX.

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { CalculatedColumnCell, MeasureCell, ModelCell, NotebookCell } from '../../domain/notebook'
+import type { CalculatedColumnCell, MeasureCell, ModelCell, NotebookCell, TestCell } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
 import type { ColumnRef, TableRef } from '../../domain/model'
+import type { ValidationSpec } from '../../domain/validation'
 import { deleteDataset, loadDatasets, loadNotebook, saveDataset, saveNotebook } from '../../persistence/notebookStore'
 import { deleteModel, loadModels, saveModel } from '../../persistence/modelStore'
 import type { CalculatedColumnInput } from '../calculatedColumn/calculatedColumnRuntime'
@@ -155,6 +156,12 @@ export function useNotebookRuntime() {
           const model = runtime.getModel(cell.modelId)
           if (model) await saveModel(model)
         }
+      },
+      createTestCell(modelId: string, validation: ValidationSpec, title?: string, prompt?: string): TestCell {
+        return runtime.createTestCell(modelId, validation, title, prompt)
+      },
+      removeTestCell(cellId: string): void {
+        runtime.removeTestCell(cellId)
       },
     }),
     [runtime],

@@ -102,4 +102,30 @@ Maps fields/measures into a simple visual for validation and understanding.
 Captures conceptual or analytical learner input.
 
 ### TestCell
-Runs one or more validation assertions against current notebook state.
+Runs one or more validation assertions against current notebook state. Backed
+by a real domain/execution contract since Sprint 5 — see
+[`../docs/VALIDATION_ENGINE.md`](../docs/VALIDATION_ENGINE.md).
+
+Contract (`src/domain/notebook.ts`):
+```ts
+interface TestCell extends BaseNotebookCell {
+  kind: 'test'
+  modelId: string
+  prompt?: string
+  validation: ValidationSpec
+}
+```
+`test` was removed from `GenericCellKind` — like `CalculatedColumnCell`/
+`MeasureCell`, it's now a fully typed cell. `modelId` and `validation` are
+always required (there is no draft `TestCell`), but unlike calculated
+columns/measures a `ValidationSpec` needs no create-time validation pass —
+it's authored data (a rule list + expected values), not an expression that
+can fail to parse/bind. `runtime/notebook/notebookRuntime.ts#createTestCell`
+appends the cell directly.
+
+Expected output:
+- a `ValidationRun` (score, per-rule status, feedback) — computed on demand
+  by `runtime/validation/validationEngine.ts#runValidation`, **never
+  persisted** and never trusted once the model's fingerprint no longer
+  matches the run that produced it (see `docs/VALIDATION_ENGINE.md`
+  "Staleness").
