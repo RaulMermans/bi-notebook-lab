@@ -1,0 +1,19 @@
+{
+  "id": "retail-foundations",
+  "title": "Retail Foundations",
+  "difficulty": "beginner",
+  "learningObjectives": [
+    "Identify fact and dimension tables",
+    "Create one-to-many relationships",
+    "Distinguish calculated columns from measures",
+    "Create Total Revenue"
+  ],
+  "cells": [
+    { "kind": "markdown", "title": "Scenario" },
+    { "kind": "data", "title": "Inspect the data" },
+    { "kind": "model", "title": "Build the model" },
+    { "kind": "calculated-column", "title": "Create Margin" },
+    { "kind": "measure", "title": "Create Total Revenue" },
+    { "kind": "test", "title": "Check your work" }
+  ]
+}
