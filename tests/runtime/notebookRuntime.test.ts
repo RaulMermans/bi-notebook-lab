@@ -14,7 +14,7 @@ function fakeDataset(id: string, name: string): Dataset {
 
 describe('NotebookRuntime', () => {
   it('adds a DataCell and registers its dataset when importing', () => {
-    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {} })
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
     const dataset = fakeDataset('ds1', 'Sales')
 
     const cell = runtime.importDataset(dataset)
@@ -27,7 +27,7 @@ describe('NotebookRuntime', () => {
   })
 
   it('removes a dataset and its DataCell together', () => {
-    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {} })
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
     runtime.importDataset(fakeDataset('ds1', 'Sales'))
 
     runtime.removeDataset('ds1')
@@ -38,7 +38,7 @@ describe('NotebookRuntime', () => {
   })
 
   it('preserves cell ordering when moving a cell', () => {
-    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {} })
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
     runtime.importDataset(fakeDataset('a', 'A'))
     runtime.importDataset(fakeDataset('b', 'B'))
     runtime.importDataset(fakeDataset('c', 'C'))
@@ -51,7 +51,7 @@ describe('NotebookRuntime', () => {
   })
 
   it('removeCell drops only the targeted cell and keeps ordering of the rest', () => {
-    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {} })
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
     runtime.importDataset(fakeDataset('a', 'A'))
     const [, second] = (() => {
       runtime.importDataset(fakeDataset('b', 'B'))
@@ -66,7 +66,7 @@ describe('NotebookRuntime', () => {
   })
 
   it('notifies subscribers on mutation and stops after unsubscribing', () => {
-    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {} })
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
     let calls = 0
     const unsubscribe = runtime.subscribe(() => {
       calls += 1
@@ -78,5 +78,28 @@ describe('NotebookRuntime', () => {
     unsubscribe()
     runtime.importDataset(fakeDataset('b', 'B'))
     expect(calls).toBe(1)
+  })
+
+  it('creates a ModelCell and registers an empty model when createModelCell is called', () => {
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
+
+    const { cell, model } = runtime.createModelCell('Retail Model')
+    const snapshot = runtime.getSnapshot()
+
+    expect(snapshot.notebook.cells).toHaveLength(1)
+    expect(snapshot.notebook.cells[0]).toMatchObject({ id: cell.id, kind: 'model', modelId: model.id })
+    expect(snapshot.models[model.id]).toEqual(model)
+    expect(model.name).toBe('Retail Model')
+  })
+
+  it('removes a model and its ModelCell together', () => {
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
+    const { model } = runtime.createModelCell()
+
+    runtime.removeModel(model.id)
+    const snapshot = runtime.getSnapshot()
+
+    expect(snapshot.notebook.cells).toHaveLength(0)
+    expect(snapshot.models[model.id]).toBeUndefined()
   })
 })

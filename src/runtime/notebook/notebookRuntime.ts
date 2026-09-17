@@ -1,10 +1,13 @@
-import type { NotebookCell, NotebookDocument } from '../../domain/notebook'
+import type { GenericNotebookCell, ModelCell, NotebookCell, NotebookDocument } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
+import type { ColumnRef, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
 import { generateId } from '../../lib/ids'
+import * as modelRuntime from '../model/modelRuntime'
 
 export interface NotebookRuntimeSnapshot {
   notebook: NotebookDocument
   datasets: Record<string, Dataset>
+  models: Record<string, SemanticModel>
 }
 
 export function emptyNotebook(title = 'Untitled Notebook'): NotebookDocument {
@@ -43,8 +46,12 @@ export class NotebookRuntime {
     return () => this.listeners.delete(listener)
   }
 
-  private commit(notebook: NotebookDocument, datasets: Record<string, Dataset> = this.snapshot.datasets): void {
-    this.snapshot = { notebook, datasets }
+  private commit(
+    notebook: NotebookDocument,
+    datasets: Record<string, Dataset> = this.snapshot.datasets,
+    models: Record<string, SemanticModel> = this.snapshot.models,
+  ): void {
+    this.snapshot = { notebook, datasets, models }
     this.listeners.forEach((listener) => listener())
   }
 
@@ -80,7 +87,13 @@ export class NotebookRuntime {
     this.commit({ ...this.snapshot.notebook, cells })
   }
 
-  updateCell(id: string, patch: Partial<NotebookCell>): void {
+  /**
+   * Patches generic cell fields (title/status/prompt/source/meta). Do not
+   * use this to change `kind`, `datasetId`, or `modelId` — construct or
+   * replace the cell via the dedicated action (`importDataset`,
+   * `createModelCell`, etc.) instead.
+   */
+  updateCell(id: string, patch: Partial<Pick<GenericNotebookCell, 'title' | 'status' | 'prompt' | 'source' | 'meta'>>): void {
     const cells = this.snapshot.notebook.cells.map((cell) => (cell.id === id ? { ...cell, ...patch } : cell))
     this.commit({ ...this.snapshot.notebook, cells })
   }
@@ -106,9 +119,83 @@ export class NotebookRuntime {
 
   /** Removes a dataset and any DataCells that reference it. */
   removeDataset(datasetId: string): void {
-    const cells = this.snapshot.notebook.cells.filter((cell) => cell.datasetId !== datasetId)
+    const cells = this.snapshot.notebook.cells.filter((cell) => !(cell.kind === 'data' && cell.datasetId === datasetId))
     const datasets = { ...this.snapshot.datasets }
     delete datasets[datasetId]
     this.commit({ ...this.snapshot.notebook, cells }, datasets)
+  }
+
+  getModel(modelId: string): SemanticModel | undefined {
+    return this.snapshot.models[modelId]
+  }
+
+  private commitModel(model: SemanticModel): void {
+    const models = { ...this.snapshot.models, [model.id]: model }
+    this.commit(this.snapshot.notebook, this.snapshot.datasets, models)
+  }
+
+  /** Creates an empty SemanticModel and appends a ModelCell that represents it. */
+  createModelCell(name?: string): { cell: ModelCell; model: SemanticModel } {
+    const model = modelRuntime.createModel(name)
+    const cell: ModelCell = {
+      id: generateId('cell'),
+      kind: 'model',
+      title: model.name,
+      modelId: model.id,
+      status: 'idle',
+    }
+    const cells = [...this.snapshot.notebook.cells, cell]
+    const models = { ...this.snapshot.models, [model.id]: model }
+    this.commit({ ...this.snapshot.notebook, cells }, this.snapshot.datasets, models)
+    return { cell, model }
+  }
+
+  /** Removes a model and any ModelCells that reference it. */
+  removeModel(modelId: string): void {
+    const cells = this.snapshot.notebook.cells.filter((cell) => !(cell.kind === 'model' && cell.modelId === modelId))
+    const models = { ...this.snapshot.models }
+    delete models[modelId]
+    this.commit({ ...this.snapshot.notebook, cells }, this.snapshot.datasets, models)
+  }
+
+  addTableToModel(modelId: string, ref: TableRef): void {
+    const model = this.getModel(modelId)
+    if (!model) return
+    this.commitModel(modelRuntime.addTable(model, ref))
+  }
+
+  removeTableFromModel(modelId: string, modelTableId: string): void {
+    const model = this.getModel(modelId)
+    if (!model) return
+    this.commitModel(modelRuntime.removeTable(model, modelTableId))
+  }
+
+  moveModelTable(modelId: string, modelTableId: string, position: { x: number; y: number }): void {
+    const model = this.getModel(modelId)
+    if (!model) return
+    this.commitModel(modelRuntime.moveTable(model, modelTableId, position))
+  }
+
+  createRelationship(
+    modelId: string,
+    input: { one: ColumnRef; many: ColumnRef; active?: boolean },
+  ): RelationshipDiagnostic[] {
+    const model = this.getModel(modelId)
+    if (!model) return []
+    const result = modelRuntime.createRelationship(model, input, this.snapshot.datasets)
+    this.commitModel(result.model)
+    return result.diagnostics
+  }
+
+  removeRelationship(modelId: string, relationshipId: string): void {
+    const model = this.getModel(modelId)
+    if (!model) return
+    this.commitModel(modelRuntime.removeRelationship(model, relationshipId))
+  }
+
+  setRelationshipActive(modelId: string, relationshipId: string, active: boolean): void {
+    const model = this.getModel(modelId)
+    if (!model) return
+    this.commitModel(modelRuntime.setRelationshipActive(model, relationshipId, active))
   }
 }

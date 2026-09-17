@@ -13,17 +13,20 @@ export const sampleNotebook: NotebookDocument = {
       prompt: 'You are analyzing a retail business with Customers, Products, Sales and Calendar tables.',
     },
     {
+      // Illustrative placeholder: this fixture is a lesson script, not
+      // executable state, so these ids don't resolve to a real Dataset.
       id: 'data',
       kind: 'data',
       title: 'Dataset',
-      prompt: 'Inspect the available tables and identify candidate keys.',
-      meta: { tables: ['Customers', 'Products', 'Sales', 'Calendar'] },
+      datasetId: 'sample-retail-dataset',
+      status: 'idle',
     },
     {
+      // Illustrative placeholder: see note above — no real SemanticModel yet.
       id: 'model',
       kind: 'model',
       title: 'Build the model',
-      prompt: 'Create a star schema with Sales as the fact table.',
+      modelId: 'sample-retail-model',
       status: 'idle',
     },
     {

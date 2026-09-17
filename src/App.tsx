@@ -4,7 +4,7 @@ import { useNotebookRuntime } from './runtime/notebook/useNotebookRuntime'
 import './styles/app.css'
 
 export default function App() {
-  const { notebook, datasets, status, actions } = useNotebookRuntime()
+  const { notebook, datasets, models, status, actions } = useNotebookRuntime()
   const hasCells = notebook.cells.length > 0
 
   return (
@@ -39,9 +39,27 @@ export default function App() {
         ) : (
           <div className="notebook">
             {notebook.cells.map((cell) => (
-              <NotebookCell key={cell.id} cell={cell} datasets={datasets} onRemoveDataset={actions.removeDataset} />
+              <NotebookCell
+                key={cell.id}
+                cell={cell}
+                datasets={datasets}
+                models={models}
+                onRemoveDataset={actions.removeDataset}
+                onRemoveModel={actions.removeModel}
+                onAddTableToModel={actions.addTableToModel}
+                onRemoveTableFromModel={actions.removeTableFromModel}
+                onMoveModelTable={actions.moveModelTable}
+                onCreateRelationship={actions.createRelationship}
+                onRemoveRelationship={actions.removeRelationship}
+                onSetRelationshipActive={actions.setRelationshipActive}
+              />
             ))}
-            <ImportDataPanel onImportDataset={actions.importDataset} compact />
+            <div className="notebook__add-actions">
+              <ImportDataPanel onImportDataset={actions.importDataset} compact />
+              <button type="button" className="secondary-button" onClick={() => actions.createModelCell()}>
+                + New model
+              </button>
+            </div>
           </div>
         )}
       </section>

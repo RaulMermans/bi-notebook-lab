@@ -12,6 +12,9 @@ const labels: Record<NotebookCell['kind'], string> = {
 }
 
 export function NotebookCellCard({ cell }: { cell: NotebookCell }) {
+  const prompt = cell.kind !== 'data' && cell.kind !== 'model' ? cell.prompt : undefined
+  const source = cell.kind !== 'data' && cell.kind !== 'model' ? cell.source : undefined
+
   return (
     <article className="cell">
       <div className="cell__rail">
@@ -22,8 +25,8 @@ export function NotebookCellCard({ cell }: { cell: NotebookCell }) {
           <h2>{cell.title}</h2>
           {cell.status && <span className={`status status--${cell.status}`}>{cell.status}</span>}
         </div>
-        {cell.prompt && <p>{cell.prompt}</p>}
-        {cell.source && <pre><code>{cell.source}</code></pre>}
+        {prompt && <p>{prompt}</p>}
+        {source && <pre><code>{source}</code></pre>}
         {cell.kind !== 'markdown' && (
           <button type="button" className="run-button">Run cell</button>
         )}

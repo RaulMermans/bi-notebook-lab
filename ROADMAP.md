@@ -32,17 +32,22 @@
 
 ---
 
-## Phase 2 — Model Runtime
+## Phase 2 — Model Runtime ✅ complete
 
-- semantic model state
-- create/delete relationships
-- one-to-many relationships
-- cardinality validation
-- active relationship rules
-- star-schema exercise checks
-- simple model visualization
+- semantic model state (`SemanticModel`, stable dataset/table/column refs)
+- create/delete relationships, one-to-many only
+- relationship validation: type compatibility, one-side uniqueness (against
+  real row data), duplicate/self-relationship rejection, unmatched-foreign-key
+  warnings with match rate
+- active/inactive relationship state
+- graph diagnostics: cycles and ambiguous active paths, isolated tables
+- topology-based fact/dimension inference and star-schema health check
+- model canvas (React Flow) with draggable table positions
+- persistence across reloads (IndexedDB `models` store)
 
-**Exit:** ModelCell can build and validate a usable semantic model.
+**Exit:** ModelCell can build and validate a usable semantic model. See
+[`docs/MODEL_RUNTIME.md`](./docs/MODEL_RUNTIME.md) for implementation
+details.
 
 ---
 

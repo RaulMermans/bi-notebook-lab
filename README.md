@@ -41,18 +41,26 @@ The first product milestone is not a dashboard builder. It is a **learning runti
 
 ## Repository status
 
-Sprint 1 (Data Runtime) is complete. This repository now contains:
+Sprint 1 (Data Runtime) and Sprint 2 (Semantic Model Runtime) are complete.
+This repository now contains:
 
 - product and architecture contracts
-- notebook/cell domain types, including a functional `DataCell`
+- notebook/cell domain types as a discriminated union, including functional
+  `DataCell` and `ModelCell` kinds
 - a working data import pipeline: CSV, Excel (multi-sheet), and a built-in
   sample retail dataset
 - deterministic type inference and column profiling
-- local persistence (IndexedDB) so a notebook survives a reload
-- roadmap and validation design for later sprints
+- a semantic model runtime: 1:* relationships with real validation (type
+  compatibility, one-side uniqueness, duplicate/self-relationship checks,
+  unmatched-foreign-key warnings), cycle/ambiguous-path graph diagnostics,
+  and topology-based fact/dimension inference
+- a visual model canvas (React Flow) that renders and repositions the model
+  — the model itself, not the canvas, is the source of truth
+- local persistence (IndexedDB) so a notebook, its datasets, and its
+  semantic models all survive a reload
 
-Relationships, calculated columns, measures, DAX, visuals and validation are
-**not** implemented yet — that starts in Sprint 2 (Semantic Modeling).
+Calculated columns, measures, DAX and filter-context execution are **not**
+implemented yet — that starts in Sprint 3.
 
 ## Run locally
 
@@ -62,7 +70,8 @@ npm run dev
 ```
 
 Then either import a `.csv`/`.xlsx` file or click **Load Retail Dataset** to
-try the built-in sample.
+try the built-in sample. Add a Model cell to select tables into a semantic
+model and build a star schema (Customers/Products/Calendar 1:* Sales).
 
 ## Core documents
 
@@ -73,6 +82,7 @@ try the built-in sample.
 - [`docs/LEARNING_MODEL.md`](./docs/LEARNING_MODEL.md)
 - [`docs/VALIDATION_ENGINE.md`](./docs/VALIDATION_ENGINE.md)
 - [`docs/DATA_RUNTIME.md`](./docs/DATA_RUNTIME.md)
+- [`docs/MODEL_RUNTIME.md`](./docs/MODEL_RUNTIME.md)
 
 ## Scope guardrail
 

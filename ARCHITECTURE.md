@@ -92,12 +92,39 @@ persistence/           IndexedDB notebook + dataset stores (idb-keyval)
 
 `NotebookRuntime` holds no framework or persistence code — it is a plain,
 synchronously-testable class (`addCell`/`removeCell`/`moveCell`/
-`importDataset`/`removeDataset`/`updateCell`), matching the "keep BI
-semantics outside React components" guardrail. `DataCell` is represented as
-the existing `NotebookCell` with `kind: 'data'` and a `datasetId`, rather
-than a separate parallel type, since the notebook already models all cell
-kinds through one shape. See [`docs/DATA_RUNTIME.md`](./docs/DATA_RUNTIME.md)
-for the full import/type-inference/persistence design.
+`importDataset`/`removeDataset`/`updateCell`, plus the Sprint 2 model actions
+below), matching the "keep BI semantics outside React components" guardrail.
+See [`docs/DATA_RUNTIME.md`](./docs/DATA_RUNTIME.md) for the full
+import/type-inference/persistence design.
+
+## Sprint 2 implementation (Model Runtime)
+
+```text
+components/notebook/ModelCellCard.tsx   UI: collapsed summary + expanded canvas/forms
+components/notebook/model/              ModelCanvas (React Flow), ModelTableNode,
+                                         RelationshipEdge, TableRegistrationPanel,
+                                         RelationshipForm, ModelHealthSummary
+runtime/model/modelRuntime.ts           Pure functions: create/add/remove table,
+                                         create/remove relationship, toggle active,
+                                         move table, validateRelationship
+runtime/model/graphAnalysis.ts          Cycle detection, ambiguous-path detection,
+                                         isolated tables, fact/dimension inference
+runtime/model/columnCompatibility.ts    Relationship column type-compatibility matrix
+persistence/modelStore.ts               IndexedDB model store, keyed by model.id
+domain/model.ts                         TableRef, ColumnRef, ModelTable, Relationship,
+                                         SemanticModel, diagnostic contracts
+```
+
+`NotebookCell` (in `domain/notebook.ts`) became a discriminated union —
+`DataCell | ModelCell | GenericNotebookCell` — so a `DataCell` without a
+`datasetId` or a `ModelCell` without a `modelId` cannot be represented.
+`modelRuntime.ts` is deliberately a set of pure `(model, ...) => model`
+functions rather than a second stateful class: `NotebookRuntime` is the only
+`useSyncExternalStore` source the UI subscribes to, and it already owns both
+`datasets` and (now) `models`, so its model-related methods are thin
+wrappers around the pure functions. See
+[`docs/MODEL_RUNTIME.md`](./docs/MODEL_RUNTIME.md) for the full
+relationship-validation, graph-diagnostic, and persistence design.
 
 ## Expression strategy
 
