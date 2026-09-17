@@ -52,12 +52,37 @@ export interface CalculatedColumn {
   updatedAt: string
 }
 
+/**
+ * A scalar expression evaluated once per query/filter context, never once
+ * per row — the Sprint 4 counterpart to `CalculatedColumn`. `homeModelTableId`
+ * only decides where the measure is displayed (Power BI's "home table"
+ * convention); its execution semantics are model-wide, since a measure's
+ * whole point is to aggregate across whatever tables the current
+ * `FilterContext` reaches. See docs/MEASURES.md.
+ */
+export interface Measure {
+  id: string
+  homeModelTableId: string
+  name: string
+  expression: string
+  dataType: DataType | 'unknown'
+  createdAt: string
+  updatedAt: string
+}
+
 export interface SemanticModel {
   id: string
   name: string
   tables: ModelTable[]
   relationships: Relationship[]
   calculatedColumns: CalculatedColumn[]
+  /**
+   * Always populated at runtime — models persisted before Sprint 4 won't
+   * have this field on disk, so every load path normalizes it through
+   * `hydrateSemanticModel` (persistence/modelStore.ts) rather than letting
+   * `undefined` leak into runtime code. See docs/MEASURES.md "Persistence".
+   */
+  measures: Measure[]
   createdAt: string
   updatedAt: string
 }

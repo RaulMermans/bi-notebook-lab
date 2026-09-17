@@ -65,7 +65,7 @@ interface ResolvedBindContext {
   currentResolved: ResolvedTableRef
 }
 
-function findModelTableByName(model: SemanticModel, datasets: Record<string, Dataset>, name: string): ModelTable | undefined {
+export function findModelTableByName(model: SemanticModel, datasets: Record<string, Dataset>, name: string): ModelTable | undefined {
   const lower = name.toLowerCase()
   return model.tables.find((t) => resolveTableRef(datasets, t)?.table.name.toLowerCase() === lower)
 }
@@ -244,6 +244,19 @@ function bindNode(node: Expression, ctx: ResolvedBindContext): BindResult {
 
     case 'FunctionCall':
       return bindFunctionCall(node, ctx)
+
+    case 'TableReference':
+      return {
+        diagnostics: [
+          diagnostic(
+            'error',
+            'BARE_TABLE_REFERENCE',
+            `"${node.table}" is a table, not a value. A calculated column can only read a column (e.g. "${node.table}[Column]") or use RELATED to reach another table.`,
+            node.span,
+            { table: node.table },
+          ),
+        ],
+      }
 
     default:
       return { diagnostics: [] }

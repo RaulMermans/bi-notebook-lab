@@ -33,12 +33,25 @@ export interface CalculatedColumnCell extends BaseNotebookCell {
 }
 
 /**
- * Cell kinds not yet backed by a runtime (Sprint 4+). Kept as one loose
+ * A measure cell stores references only — the actual `Measure` definition
+ * (expression, home table, data type) lives in the `SemanticModel` named by
+ * `modelId`, mirroring `CalculatedColumnCell` exactly. There is no "draft"
+ * MeasureCell: an expression that fails to validate never becomes a cell
+ * (see docs/MEASURES.md).
+ */
+export interface MeasureCell extends BaseNotebookCell {
+  kind: 'measure'
+  modelId: string
+  measureId: string
+}
+
+/**
+ * Cell kinds not yet backed by a runtime (Sprint 5+). Kept as one loose
  * shape rather than a fully-typed member per kind until each one gets a
  * real domain/execution contract (AGENTS.md: "New cell types require a
  * domain contract and execution contract first").
  */
-export type GenericCellKind = 'markdown' | 'measure' | 'visual' | 'question' | 'test'
+export type GenericCellKind = 'markdown' | 'visual' | 'question' | 'test'
 
 export interface GenericNotebookCell extends BaseNotebookCell {
   kind: GenericCellKind
@@ -47,7 +60,7 @@ export interface GenericNotebookCell extends BaseNotebookCell {
   meta?: Record<string, unknown>
 }
 
-export type NotebookCell = DataCell | ModelCell | CalculatedColumnCell | GenericNotebookCell
+export type NotebookCell = DataCell | ModelCell | CalculatedColumnCell | MeasureCell | GenericNotebookCell
 export type CellKind = NotebookCell['kind']
 
 export interface NotebookDocument {

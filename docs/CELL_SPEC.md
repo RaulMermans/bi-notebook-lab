@@ -70,12 +70,30 @@ Expected output:
   explanation)
 
 ### MeasureCell
-Creates a context-sensitive aggregation.
+Creates a context-sensitive aggregation. Backed by a real domain/execution
+contract since Sprint 4 — see [`../docs/MEASURES.md`](../docs/MEASURES.md)
+and [`../docs/FILTER_CONTEXT.md`](../docs/FILTER_CONTEXT.md).
+
+Contract (`src/domain/notebook.ts`):
+```ts
+interface MeasureCell extends BaseNotebookCell {
+  kind: 'measure'
+  modelId: string
+  measureId: string
+}
+```
+Both ids are always required — the cell stores references only; the
+`Measure` definition (name, expression, home table, inferred type) lives
+in `SemanticModel.measures`. There is no draft cell, mirroring
+`CalculatedColumnCell`.
 
 Expected output:
-- measure definition
-- scalar result under a given filter context
-- execution trace
+- measure definition (persisted)
+- scalar result, both unfiltered and under a learner-editable
+  `FilterContext` (never persisted — recomputed on every evaluation)
+- execution trace (filter context, relationship propagation, aggregation
+  and measure-reference nodes — real runtime execution trace, not a
+  UI-reconstructed explanation)
 
 ### VisualCell
 Maps fields/measures into a simple visual for validation and understanding.

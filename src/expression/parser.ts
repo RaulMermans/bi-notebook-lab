@@ -136,10 +136,9 @@ class Parser {
       if (this.peek().type === '(') {
         return this.functionCall(token)
       }
-      throw new ParseError(
-        `Unexpected identifier "${token.text}". Expected "${token.text}[Column]" or "${token.text}(...)".`,
-        token.span,
-      )
+      // A bare table name (e.g. `Sales` in `COUNTROWS(Sales)`). Whether this
+      // is valid here is a binder concern — see ast.ts's TableReferenceNode doc.
+      return { kind: 'TableReference', table: token.text, span: token.span }
     }
 
     throw new ParseError(`Unexpected ${describeToken(token)}.`, token.span)

@@ -39,11 +39,12 @@ export const sampleNotebook: NotebookDocument = {
       status: 'idle',
     },
     {
+      // Illustrative placeholder: see note above — no real Measure yet.
       id: 'measure',
       kind: 'measure',
-      title: 'Measure',
-      prompt: 'Create Total Revenue.',
-      source: 'Total Revenue = SUM(Sales[Revenue])',
+      title: 'Total Revenue',
+      modelId: 'sample-retail-model',
+      measureId: 'sample-total-revenue-measure',
       status: 'idle',
     },
     {

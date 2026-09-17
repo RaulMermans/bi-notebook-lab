@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { CalculatedColumnCell, ModelCell, NotebookCell } from '../../domain/notebook'
+import type { CalculatedColumnCell, MeasureCell, ModelCell, NotebookCell } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
 import type { ColumnRef, TableRef } from '../../domain/model'
 import { deleteDataset, loadDatasets, loadNotebook, saveDataset, saveNotebook } from '../../persistence/notebookStore'
 import { deleteModel, loadModels, saveModel } from '../../persistence/modelStore'
 import type { CalculatedColumnInput } from '../calculatedColumn/calculatedColumnRuntime'
+import type { MeasureInput } from '../measure/measureRuntime'
 import { NotebookRuntime, emptyNotebook } from './notebookRuntime'
 
 export type HydrationStatus = 'loading' | 'ready'
@@ -130,6 +131,26 @@ export function useNotebookRuntime() {
           (c): c is CalculatedColumnCell => c.id === cellId && c.kind === 'calculated-column',
         )
         runtime.removeCalculatedColumnCell(cellId)
+        if (cell) {
+          const model = runtime.getModel(cell.modelId)
+          if (model) await saveModel(model)
+        }
+      },
+      async createMeasureCell(modelId: string, input: MeasureInput) {
+        const result = runtime.createMeasureCell(modelId, input)
+        const model = runtime.getModel(modelId)
+        if (result.cell && model) await saveModel(model)
+        return result
+      },
+      async updateMeasure(modelId: string, measureId: string, patch: { name?: string; expression?: string; homeModelTableId?: string }) {
+        const result = runtime.updateMeasure(modelId, measureId, patch)
+        const model = runtime.getModel(modelId)
+        if (result.measure && model) await saveModel(model)
+        return result
+      },
+      async removeMeasureCell(cellId: string): Promise<void> {
+        const cell = runtime.getSnapshot().notebook.cells.find((c): c is MeasureCell => c.id === cellId && c.kind === 'measure')
+        runtime.removeMeasureCell(cellId)
         if (cell) {
           const model = runtime.getModel(cell.modelId)
           if (model) await saveModel(model)

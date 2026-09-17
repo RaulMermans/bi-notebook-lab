@@ -163,6 +163,49 @@ recomputed rather than cached. See
 [`docs/CALCULATED_COLUMNS.md`](./docs/CALCULATED_COLUMNS.md) for the full
 design.
 
+## Sprint 4 implementation (Measures + Filter Context)
+
+```text
+expression/
+  ast.ts                    + TableReferenceNode (bare `Sales`, e.g. inside COUNTROWS)
+  parser.ts                 accepts a bare identifier as TableReferenceNode instead of a SYNTAX_ERROR
+  diagnostics.ts            + measure/filter-context diagnostic codes
+  measureBinder.ts          bindMeasureExpression() — a second, parallel binder for measures,
+                             sharing the parser/AST/diagnostics/name-resolution helpers from binder.ts
+  trace.ts                  + measure-reference | aggregation | filter-context | relationship-propagation
+
+runtime/measure/
+  logicalColumn.ts           unifies physical + calculated columns for aggregation binding/evaluation
+  filterContext.ts            FilterContext / ColumnFilter contracts
+  filterPropagation.ts        resolveFilterContext(): direct filters -> fixed-point 1->* propagation,
+                               fails closed on ACTIVE_CYCLE/AMBIGUOUS_PATH
+  aggregation.ts               SUM/AVERAGE/MIN/MAX/COUNT/DISTINCTCOUNT/COUNTROWS over visible rows
+  dependencyGraph.ts            measure-reference graph + cycle detection (shares lib/graph/cycle.ts
+                                 with runtime/model/graphAnalysis.ts's relationship-cycle check)
+  measureEvaluator.ts            evaluateMeasure(): recursive evaluation with per-evaluation caches
+  measureRuntime.ts               validate/create/update/remove — same shape as calculatedColumnRuntime.ts
+
+runtime/model/graphAnalysis.ts   directedActiveGraph/undirectedActiveEdges exported (were private)
+                                  so filterPropagation.ts reuses the same graph builders as the
+                                  ACTIVE_CYCLE/AMBIGUOUS_PATH diagnostics, instead of a third one
+runtime/model/modelRuntime.ts    + hydrateSemanticModel() for pre-Sprint-4 persisted models
+
+components/notebook/       MeasureCellCard.tsx, CreateMeasurePanel.tsx
+components/notebook/
+  measure/                  FilterContextPanel, MeasureTraceVisualizer
+  shared/TraceTree.tsx      TraceNodeView extracted so calculated-column and measure traces
+                            render through one component
+
+domain/model.ts             Measure + SemanticModel.measures
+domain/notebook.ts           MeasureCell (real cell kind, promoted out of GenericCellKind)
+```
+
+See [`docs/MEASURES.md`](./docs/MEASURES.md) and
+[`docs/FILTER_CONTEXT.md`](./docs/FILTER_CONTEXT.md) for the full design:
+measure vs. calculated-column semantics, the measure-binding rules,
+supported aggregations, dependency/cycle detection, the filter-propagation
+algorithm, and execution traces.
+
 ## Expression strategy
 
 Do not implement full DAX.
@@ -173,11 +216,15 @@ references, and `RELATED(Table[Column])` — see
 [`docs/EXPRESSION_ENGINE.md`](./docs/EXPRESSION_ENGINE.md) for the exact
 grammar ("BI Notebook DAX Subset — Sprint 3").
 
-Sprint 4 (Measures) is expected to extend the *same* parser/AST/binder/
-diagnostics/trace modules with aggregation and filter-context semantics
-(`SUM`, `COUNTROWS`, `DISTINCTCOUNT`, `AVERAGE`, `DIVIDE`, `CALCULATE`,
-simple boolean filters) rather than introducing a second expression
-system — if it can't be reused for measures, Sprint 3 built the wrong
-abstraction.
+Sprint 4 (Measures) extends the *same* parser/AST/diagnostics/trace
+modules with aggregation and filter-context semantics (`SUM`,
+`COUNTROWS`, `DISTINCTCOUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `DIVIDE`,
+measure references) via a second binder and a new measure-evaluation
+runtime, rather than a second expression system — Sprint 3's abstraction
+held up. `CALCULATE` and boolean filter expressions remain deferred (see
+`docs/FILTER_CONTEXT.md` "Known limitations"): Sprint 4 first had to prove
+`FilterContext` + relationship propagation + aggregation work end to end
+on the *same* measure-execution architecture `CALCULATE` will eventually
+plug into.
 
 The language may look DAX-like, but semantics and supported functions must be explicit.

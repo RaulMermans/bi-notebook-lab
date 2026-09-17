@@ -1,10 +1,11 @@
-# Expression Engine (Sprint 3)
+# Expression Engine (Sprint 3 + Sprint 4)
 
 This document describes the reusable expression system introduced in
-Sprint 3 to execute calculated-column formulas. It is designed to be the
-same parser/AST/binder/diagnostics/trace machinery Sprint 4 (Measures)
-extends with aggregation and filter-context semantics — not a one-off
-calculated-column parser.
+Sprint 3 to execute calculated-column formulas, and how Sprint 4
+(Measures) extends it with aggregation and filter-context semantics
+without introducing a second parser. See [`MEASURES.md`](./MEASURES.md)
+and [`FILTER_CONTEXT.md`](./FILTER_CONTEXT.md) for the Sprint 4-specific
+runtime built on top of this engine.
 
 ## Pipeline
 
@@ -25,6 +26,27 @@ Each stage has one job:
   calls to a specific `Relationship`.
 - **Evaluator**: `bound tree + row context -> result`. Reads actual row
   values and computes.
+
+Sprint 4 diverges at the binder step only:
+
+```text
+                    Expression AST
+                          │
+              ┌───────────┴───────────┐
+              │                       │
+      bind()                 bindMeasureExpression()
+   (calculated column)              (measure)
+              │                       │
+        RowContext              FilterContext
+              │                       │
+   evaluateBoundExpressionOverTable   measureEvaluator.ts
+        (evaluator.ts)          (runtime/measure/)
+```
+
+Both binders share the same lexer, parser, AST, diagnostics factory and
+name-resolution helpers (`findModelTableByName`,
+`resolveTableRef`/`resolveColumnRef`). See
+[`MEASURES.md`](./MEASURES.md) for the measure-side pipeline.
 
 ## BI Notebook DAX Subset — Sprint 3
 
@@ -50,10 +72,18 @@ Operator precedence (highest to lowest): unary `-`, then `*`/`/`, then
 `+`/`-`. Same-precedence operators are left-associative
 (`10 - 2 - 3` is `(10 - 2) - 3`).
 
-Not supported in Sprint 3 (see AGENTS.md/ROADMAP.md "Explicitly out of
-scope"): `SUM`/`COUNT`/`AVERAGE`/`DISTINCTCOUNT`/`DIVIDE`, measure
-references, filter context, `CALCULATE`, `FILTER`, `ALL`, time
-intelligence, and any function other than `RELATED`.
+Not supported in **calculated columns** (`binder.ts`'s `bind()`), still:
+`SUM`/`COUNT`/`AVERAGE`/`DISTINCTCOUNT`/`DIVIDE`, measure references,
+filter context, and any function other than `RELATED` — calculated-column
+semantics are unchanged from Sprint 3.
+
+Sprint 4 adds a **second binding mode for measures**
+(`measureBinder.ts`'s `bindMeasureExpression()`), sharing this same
+lexer/parser/AST, that supports `SUM`/`AVERAGE`/`MIN`/`MAX`/`COUNT`/
+`COUNTROWS`/`DISTINCTCOUNT`/`DIVIDE` and measure references but rejects
+`RELATED` and naked physical columns — see [`MEASURES.md`](./MEASURES.md)
+"Measure binding" for the full rules. `CALCULATE`, `FILTER`, `ALL` and
+time intelligence remain out of scope for both modes.
 
 ## AST (`src/expression/ast.ts`)
 
@@ -64,12 +94,23 @@ Expression =
   | UnaryExpressionNode  { operator: '-'; operand }
   | BinaryExpressionNode { operator: '+'|'-'|'*'|'/'; left; right }
   | FunctionCallNode     { name: string; args: Expression[] }
+  | TableReferenceNode   { table: string }
 ```
 
 Every node carries a `span: { start, end }` (character offsets into the
 source string), and `ColumnReferenceNode` additionally carries
 `tableSpan`/`columnSpan` so diagnostics can point at the exact substring
 that's wrong (e.g. the `Revenu` in `Sales[Revenu]`).
+
+`TableReferenceNode` is a Sprint 4 addition: a bare table name with no
+`[...]`/`(...)` following it, e.g. the `Sales` in `COUNTROWS(Sales)`.
+Sprint 3's parser threw a `SYNTAX_ERROR` for a bare identifier in that
+position; the parser now accepts it unconditionally as a
+`TableReferenceNode`, and whether it's valid where it appears (only as a
+`COUNTROWS` argument in measure mode) is a **binder** decision, not a
+parser one — see `measureBinder.ts`'s `BARE_TABLE_REFERENCE` diagnostic.
+This is a pure grammar extension: no calculated-column expression that
+parsed before Sprint 4 parses differently now.
 
 ## Parser (`src/expression/parser.ts`, `lexer.ts`)
 
@@ -79,7 +120,18 @@ dependency. `parseExpression(source)` never throws: a malformed expression
 returns `{ diagnostics: [{ code: 'SYNTAX_ERROR', ... }] }` with no
 `expression`.
 
-## Semantic binding (`src/expression/binder.ts`)
+## Semantic binding (`src/expression/binder.ts`, `src/expression/measureBinder.ts`)
+
+Sprint 4 does **not** add a `mode` flag to `bind()`. Instead it adds a
+second, separate public entry point — `bindMeasureExpression()` in its own
+module — that shares internals (`findModelTableByName`, the diagnostic
+factory, `resolveTableRef`/`resolveColumnRef`) but implements different
+rules, because a calculated column's row-context scoping
+(`COLUMN_OUTSIDE_ROW_CONTEXT`) has no meaning for a measure — a measure's
+whole point is reading any table in the model via `CALCULATE`(-adjacent)
+constructs, later. See [`MEASURES.md`](./MEASURES.md) "Measure binding"
+for `bindMeasureExpression`'s rules in full; this section covers only
+`bind()` (calculated columns), unchanged from Sprint 3.
 
 `bind(expression, { model, datasets, currentModelTableId })` resolves
 every `ColumnReferenceNode`/`FunctionCallNode` against the real
@@ -154,6 +206,7 @@ for every row. An unmatched foreign key returns `null` (blank) with
 ```ts
 interface ExecutionTraceNode {
   kind: 'literal' | 'column-read' | 'unary-operation' | 'binary-operation' | 'related-lookup' | 'result'
+      | 'measure-reference' | 'aggregation' | 'filter-context' | 'relationship-propagation'
   label: string
   value?: unknown
   children?: ExecutionTraceNode[]
@@ -161,10 +214,13 @@ interface ExecutionTraceNode {
 }
 ```
 
-This is real runtime output — the row-context visualizer renders exactly
-this tree, never a reconstructed explanation string. Sprint 4 is expected
-to add `aggregation`, `filter-context`, `relationship-propagation` and
-`calculate` trace kinds on top of the same shape.
+This is real runtime output — the row-context visualizer (calculated
+columns) and the measure trace visualizer both render exactly this tree
+through a shared `TraceNodeView` component, never a reconstructed
+explanation string. The last four kinds are Sprint 4 additions on the
+same shape — see [`FILTER_CONTEXT.md`](./FILTER_CONTEXT.md) "Execution
+trace" for what each one carries. (`calculate` is deferred along with
+`CALCULATE` itself.)
 
 ## Diagnostics (`src/expression/diagnostics.ts`)
 
@@ -175,30 +231,44 @@ type ExpressionDiagnosticCode =
   | 'UNSUPPORTED_FUNCTION' | 'INVALID_FUNCTION_ARGUMENT'
   | 'RELATED_NO_RELATIONSHIP' | 'RELATED_INACTIVE_RELATIONSHIP'
   | 'RELATED_WRONG_DIRECTION' | 'RELATED_AMBIGUOUS_RELATIONSHIP'
+  // Sprint 4 (measures / filter context)
+  | 'BARE_TABLE_REFERENCE' | 'UNKNOWN_MEASURE' | 'DUPLICATE_MEASURE' | 'MEASURE_DEPENDENCY_CYCLE'
+  | 'COLUMN_REQUIRES_AGGREGATION' | 'INVALID_AGGREGATION_ARGUMENT' | 'NON_NUMERIC_AGGREGATION'
+  | 'FILTER_GRAPH_INVALID' | 'INVALID_FILTER_VALUE' | 'RELATED_REQUIRES_ROW_CONTEXT'
 ```
 
-`UNSUPPORTED_FUNCTION` (calling anything other than `RELATED`) and
-`INVALID_FUNCTION_ARGUMENT` (`RELATED` called with the wrong shape of
-argument) are additions beyond the sprint brief's suggested list — the
-brief calls its list "suggested categories", and the binder needs
-*something* structured to return for those cases without perfectly
-DAX-compatible functions.
+`UNSUPPORTED_FUNCTION` (calling anything other than `RELATED`, or an
+unrecognized function in measure mode) and `INVALID_FUNCTION_ARGUMENT`
+(`RELATED`/`DIVIDE` called with the wrong shape of argument) are additions
+beyond the sprint briefs' suggested lists — both briefs call their lists
+"suggested categories" or "codes equivalent to", and the binder needs
+*something* structured to return for cases the exact list doesn't name.
+The Sprint 4 codes not in the sprint brief's literal list
+(`BARE_TABLE_REFERENCE`, `RELATED_REQUIRES_ROW_CONTEXT`) follow the same
+pattern — see [`MEASURES.md`](./MEASURES.md) for what each one means.
 
 Every diagnostic carries `severity`, `code`, `message`, and (when it
 applies to a specific piece of source) a `span`. `TYPE_MISMATCH` and
 `DIVISION_ERROR` are the two codes that show up as *row-level*
 `RowEvaluationError`s instead of expression-level diagnostics, since they
 depend on an actual row's values, not just static structure.
+`FILTER_GRAPH_INVALID` is unusual in that it has no `span` at all — it
+describes a problem with the *model's* relationship graph, not a specific
+piece of the measure's expression.
 
 ## Known incompatibilities with full DAX
 
-- No aggregation functions (`SUM`, `COUNTROWS`, ...), no measures, no
-  filter context, no `CALCULATE` — Sprint 4 scope.
+- No `CALCULATE`/`FILTER`/`ALL`/`REMOVEFILTERS`, no context transition, no
+  time intelligence — deferred past Sprint 4 (see `MEASURES.md`/
+  `FILTER_CONTEXT.md` "Known limitations").
 - Blank/`BLANK()` coercion rules are simplified (see above).
 - Table/column name matching is case-insensitive; real DAX is
   case-insensitive for identifiers too, but the exact edge cases (e.g.
   Unicode normalization) aren't specially handled here.
 - `RELATED` only follows a *direct*, *active*, *unambiguous* many→one
-  relationship — no multi-hop relationship chains.
+  relationship — no multi-hop relationship chains. (Filter propagation
+  for measures, by contrast, *is* transitive — see `FILTER_CONTEXT.md`.)
 - No calculated-column-to-calculated-column references (see
-  `docs/CALCULATED_COLUMNS.md` "Dependency scope").
+  `docs/CALCULATED_COLUMNS.md` "Dependency scope") — but a measure *can*
+  aggregate a calculated column (see `MEASURES.md` "Logical column
+  access").

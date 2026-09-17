@@ -41,13 +41,13 @@ The first product milestone is not a dashboard builder. It is a **learning runti
 
 ## Repository status
 
-Sprint 1 (Data Runtime), Sprint 2 (Semantic Model Runtime) and Sprint 3
-(Calculated Columns & Row Context) are complete. This repository now
-contains:
+Sprint 1 (Data Runtime), Sprint 2 (Semantic Model Runtime), Sprint 3
+(Calculated Columns & Row Context) and Sprint 4 (Measures & Filter
+Context) are complete. This repository now contains:
 
 - product and architecture contracts
 - notebook/cell domain types as a discriminated union, including functional
-  `DataCell`, `ModelCell` and `CalculatedColumnCell` kinds
+  `DataCell`, `ModelCell`, `CalculatedColumnCell` and `MeasureCell` kinds
 - a working data import pipeline: CSV, Excel (multi-sheet), and a built-in
   sample retail dataset
 - deterministic type inference and column profiling
@@ -61,14 +61,25 @@ contains:
   execution trace) that actually executes a bounded Power BI-style scalar
   grammar row by row, including `RELATED` through active relationships,
   with structured diagnostics and a row-context visualizer
+- real measures — `SUM`/`AVERAGE`/`MIN`/`MAX`/`COUNT`/`COUNTROWS`/
+  `DISTINCTCOUNT`/`DIVIDE`, measure references with dependency-cycle
+  detection, and aggregation over both physical and calculated columns —
+  evaluated through a second binder over the *same* expression engine
+- an explicit `FilterContext`: direct filters, transitive one → many
+  relationship propagation with inactive relationships correctly ignored,
+  and a fail-closed guard against ambiguous/cyclic relationship graphs
+- a measure execution trace (filter context, relationship propagation,
+  aggregation, measure references) rendered through the same trace-tree
+  component as the row-context visualizer
 - local persistence (IndexedDB) so a notebook, its datasets, its semantic
-  models, and their calculated columns all survive a reload
+  models, and their calculated columns and measures all survive a reload,
+  with pre-Sprint-4 models hydrating safely
 
-Measures, filter context and `CALCULATE` are **not** implemented yet —
-that starts in Sprint 4. See
-[`docs/EXPRESSION_ENGINE.md`](./docs/EXPRESSION_ENGINE.md) and
-[`docs/CALCULATED_COLUMNS.md`](./docs/CALCULATED_COLUMNS.md) for the
-Sprint 3 design.
+`CALCULATE`, `FILTER`, bidirectional/many-to-many relationships and time
+intelligence are **not** implemented yet — see
+[`docs/MEASURES.md`](./docs/MEASURES.md) and
+[`docs/FILTER_CONTEXT.md`](./docs/FILTER_CONTEXT.md) for the Sprint 4
+design and known limitations.
 
 ## Run locally
 
@@ -83,6 +94,11 @@ model and build a star schema (Customers/Products/Calendar 1:* Sales), then
 use **+ New calculated column** to write a row-level expression such as
 `Sales[Revenue] - Sales[Cost]` or `RELATED(Products[Category])`.
 
+Use **+ New measure** to create `SUM(Sales[Revenue])`, `DISTINCTCOUNT(Sales[OrderID])`
+or `DIVIDE([Total Revenue], [Orders])`, then expand the measure cell to add
+filters (e.g. `Customers[Country] = Spain`) and watch the result recompute
+with a full execution trace.
+
 ## Core documents
 
 - [`PRODUCT.md`](./PRODUCT.md)
@@ -95,6 +111,8 @@ use **+ New calculated column** to write a row-level expression such as
 - [`docs/MODEL_RUNTIME.md`](./docs/MODEL_RUNTIME.md)
 - [`docs/EXPRESSION_ENGINE.md`](./docs/EXPRESSION_ENGINE.md)
 - [`docs/CALCULATED_COLUMNS.md`](./docs/CALCULATED_COLUMNS.md)
+- [`docs/MEASURES.md`](./docs/MEASURES.md)
+- [`docs/FILTER_CONTEXT.md`](./docs/FILTER_CONTEXT.md)
 
 ## Scope guardrail
 

@@ -1,17 +1,24 @@
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react'
 import type { DataColumn } from '../../../domain/data'
-import type { CalculatedColumn } from '../../../domain/model'
+import type { CalculatedColumn, Measure } from '../../../domain/model'
 
 export interface ModelTableNodeData extends Record<string, unknown> {
   tableName: string
   columns: DataColumn[]
   keyColumnIds: Set<string>
   calculatedColumns: CalculatedColumn[]
+  measures: Measure[]
 }
 
 export type ModelTableNodeType = Node<ModelTableNodeData, 'modelTable'>
 
-/** `fx` distinguishes a calculated column from a physical one — Sprint 3 calculated columns don't participate in relationships (docs/CALCULATED_COLUMNS.md "Model canvas integration"). */
+/**
+ * `fx` distinguishes a calculated column from a physical one — Sprint 3
+ * calculated columns don't participate in relationships
+ * (docs/CALCULATED_COLUMNS.md "Model canvas integration"). `∑` distinguishes
+ * a measure the same way — measures never become relationship endpoints
+ * either (docs/MEASURES.md "Model Canvas Integration").
+ */
 export function ModelTableNode({ data }: NodeProps<ModelTableNodeType>) {
   return (
     <div className="model-node">
@@ -30,6 +37,14 @@ export function ModelTableNode({ data }: NodeProps<ModelTableNodeType>) {
               <span className="model-node__fx">fx</span> {column.name}
             </span>
             <span className="type-badge">{column.dataType}</span>
+          </li>
+        ))}
+        {data.measures.map((measure) => (
+          <li key={measure.id} className="model-node__column--measure">
+            <span>
+              <span className="model-node__sigma">∑</span> {measure.name}
+            </span>
+            <span className="type-badge">{measure.dataType}</span>
           </li>
         ))}
       </ul>

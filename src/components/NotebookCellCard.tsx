@@ -11,9 +11,9 @@ const labels: Record<NotebookCell['kind'], string> = {
   test: 'TEST',
 }
 
-/** Renders the still-generic cell kinds (markdown/measure/visual/question/test). `data`/`model`/`calculated-column` have dedicated cards. */
+/** Renders the still-generic cell kinds (markdown/visual/question/test). `data`/`model`/`calculated-column`/`measure` have dedicated cards. */
 export function NotebookCellCard({ cell }: { cell: NotebookCell }) {
-  const isGeneric = cell.kind !== 'data' && cell.kind !== 'model' && cell.kind !== 'calculated-column'
+  const isGeneric = cell.kind !== 'data' && cell.kind !== 'model' && cell.kind !== 'calculated-column' && cell.kind !== 'measure'
   const prompt = isGeneric ? cell.prompt : undefined
   const source = isGeneric ? cell.source : undefined
 

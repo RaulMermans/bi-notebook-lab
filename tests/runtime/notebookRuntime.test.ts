@@ -187,4 +187,72 @@ describe('NotebookRuntime', () => {
     expect(snapshot.notebook.cells).toHaveLength(2)
     expect(snapshot.models[model.id].calculatedColumns).toHaveLength(0)
   })
+
+  it('creates a MeasureCell only when the expression validates, and appends it to both notebook and model', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+
+    const result = runtime.createMeasureCell(model.id, {
+      homeModelTableId: salesTableId,
+      name: 'Total Revenue',
+      expression: 'SUM(Sales[Revenue])',
+    })
+
+    expect(result.diagnostics).toEqual([])
+    const snapshot = runtime.getSnapshot()
+    expect(snapshot.notebook.cells).toHaveLength(3)
+    expect(snapshot.notebook.cells[2]).toMatchObject({
+      kind: 'measure',
+      modelId: model.id,
+      measureId: result.measure!.id,
+      title: 'Total Revenue',
+    })
+    expect(snapshot.models[model.id].measures).toHaveLength(1)
+    expect(result.execution?.value).toBe(120)
+  })
+
+  it('does not create a cell when the measure fails to validate', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+
+    const result = runtime.createMeasureCell(model.id, {
+      homeModelTableId: salesTableId,
+      name: 'Bad Measure',
+      expression: 'Sales[Revenue]',
+    })
+
+    expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'COLUMN_REQUIRES_AGGREGATION' })])
+    const snapshot = runtime.getSnapshot()
+    expect(snapshot.notebook.cells).toHaveLength(2) // just the DataCell + ModelCell
+    expect(snapshot.models[model.id].measures).toHaveLength(0)
+  })
+
+  it('updates a measure and renames its cell to match', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+    const created = runtime.createMeasureCell(model.id, {
+      homeModelTableId: salesTableId,
+      name: 'Total Revenue',
+      expression: 'SUM(Sales[Revenue])',
+    })
+
+    const updated = runtime.updateMeasure(model.id, created.measure!.id, { name: 'Revenue Total' })
+
+    expect(updated.diagnostics).toEqual([])
+    const snapshot = runtime.getSnapshot()
+    expect(snapshot.notebook.cells[2].title).toBe('Revenue Total')
+    expect(snapshot.models[model.id].measures[0].name).toBe('Revenue Total')
+  })
+
+  it('removes a MeasureCell and its definition together', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+    const created = runtime.createMeasureCell(model.id, {
+      homeModelTableId: salesTableId,
+      name: 'Total Revenue',
+      expression: 'SUM(Sales[Revenue])',
+    })
+
+    runtime.removeMeasureCell(created.cell!.id)
+
+    const snapshot = runtime.getSnapshot()
+    expect(snapshot.notebook.cells).toHaveLength(2)
+    expect(snapshot.models[model.id].measures).toHaveLength(0)
+  })
 })

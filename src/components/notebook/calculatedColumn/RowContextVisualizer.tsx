@@ -1,31 +1,9 @@
 import type { DataColumn } from '../../../domain/data'
 import type { ExecutionTraceNode } from '../../../expression/trace'
+import { formatTraceValue, TraceNodeView } from '../shared/TraceTree'
 
 function formatValue(value: unknown): string {
-  if (value === null || value === undefined) return 'BLANK'
-  if (typeof value === 'boolean') return value ? 'true' : 'false'
-  return String(value)
-}
-
-function TraceNodeView({ node, depth }: { node: ExecutionTraceNode; depth: number }) {
-  return (
-    <li className={`trace-node trace-node--${node.kind}`}>
-      <div className="trace-node__row">
-        <span className="trace-node__label">{node.label}</span>
-        {node.value !== undefined && <span className="trace-node__arrow">→ {formatValue(node.value)}</span>}
-        {node.kind === 'related-lookup' && node.metadata?.matched === false && (
-          <span className="trace-node__note">no matching row</span>
-        )}
-      </div>
-      {node.children && node.children.length > 0 && depth < 8 && (
-        <ul className="trace-tree">
-          {node.children.map((child, index) => (
-            <TraceNodeView key={index} node={child} depth={depth + 1} />
-          ))}
-        </ul>
-      )}
-    </li>
-  )
+  return formatTraceValue(value)
 }
 
 interface RowContextVisualizerProps {

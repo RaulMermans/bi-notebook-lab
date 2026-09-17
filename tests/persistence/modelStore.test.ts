@@ -1,3 +1,4 @@
+import { createStore, set } from 'idb-keyval'
 import { describe, expect, it } from 'vitest'
 import type { SemanticModel } from '../../src/domain/model'
 import { deleteModel, loadModel, loadModels, saveModel } from '../../src/persistence/modelStore'
@@ -10,6 +11,7 @@ function fakeModel(id: string): SemanticModel {
     tables: [{ id: `${id}-table`, datasetId: 'ds1', tableId: 'ds1-table', position: { x: 10, y: 20 } }],
     relationships: [],
     calculatedColumns: [],
+    measures: [],
     createdAt: now,
     updatedAt: now,
   }
@@ -41,5 +43,24 @@ describe('modelStore persistence', () => {
     const restored = await loadModel('model-del')
 
     expect(restored).toBeUndefined()
+  })
+
+  it('hydrates a pre-Sprint-4 persisted model (no `measures` field) with an empty measures array', async () => {
+    const legacyStore = createStore('bi-notebook-lab-models', 'models')
+    const now = new Date().toISOString()
+    const legacyModel = {
+      id: 'model-legacy',
+      name: 'model-legacy',
+      tables: [],
+      relationships: [],
+      calculatedColumns: [],
+      createdAt: now,
+      updatedAt: now,
+    }
+    await set('model-legacy', legacyModel, legacyStore)
+
+    const restored = await loadModel('model-legacy')
+
+    expect(restored?.measures).toEqual([])
   })
 })

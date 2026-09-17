@@ -1,5 +1,6 @@
 import { createStore, del, get, set } from 'idb-keyval'
 import type { SemanticModel } from '../domain/model'
+import { hydrateSemanticModel } from '../runtime/model/modelRuntime'
 
 const modelStore = createStore('bi-notebook-lab-models', 'models')
 
@@ -11,8 +12,10 @@ export async function saveModel(model: SemanticModel): Promise<void> {
   await set(model.id, model, modelStore)
 }
 
+/** Always hydrates through `hydrateSemanticModel` so a model persisted before Sprint 4 (no `measures` field) never reaches runtime code as `undefined`. */
 export async function loadModel(modelId: string): Promise<SemanticModel | undefined> {
-  return get<SemanticModel>(modelId, modelStore)
+  const model = await get<SemanticModel>(modelId, modelStore)
+  return model ? hydrateSemanticModel(model) : undefined
 }
 
 export async function loadModels(modelIds: string[]): Promise<Record<string, SemanticModel>> {

@@ -69,7 +69,6 @@ export interface BinaryExpressionNode {
   span: SourceSpan
 }
 
-/** Sprint 3 supports exactly one function: `RELATED(Table[Column])`. */
 export interface FunctionCallNode {
   kind: 'FunctionCall'
   name: string
@@ -78,4 +77,25 @@ export interface FunctionCallNode {
   span: SourceSpan
 }
 
-export type Expression = LiteralNode | ColumnReferenceNode | UnaryExpressionNode | BinaryExpressionNode | FunctionCallNode
+/**
+ * A bare table name with no `[...]`/`(...)` following it, e.g. the `Sales`
+ * in `COUNTROWS(Sales)`. Sprint 3 had no such node — every identifier had to
+ * be followed by a bracket or a parenthesis. Sprint 4 measures need it for
+ * table-scoped aggregations; the parser accepts it unconditionally, and
+ * whether it's actually valid where it appears (only as a `COUNTROWS`
+ * argument in measure mode) is decided by the binder, not the parser (see
+ * docs/EXPRESSION_ENGINE.md).
+ */
+export interface TableReferenceNode {
+  kind: 'TableReference'
+  table: string
+  span: SourceSpan
+}
+
+export type Expression =
+  | LiteralNode
+  | ColumnReferenceNode
+  | UnaryExpressionNode
+  | BinaryExpressionNode
+  | FunctionCallNode
+  | TableReferenceNode

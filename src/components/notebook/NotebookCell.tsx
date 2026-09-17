@@ -1,11 +1,13 @@
 import type { NotebookCell as NotebookCellModel } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
-import type { CalculatedColumn, ColumnRef, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
+import type { CalculatedColumn, ColumnRef, Measure, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
 import type { ExpressionDiagnostic } from '../../expression/diagnostics'
 import type { CalculatedColumnExecution } from '../../runtime/calculatedColumn/calculatedColumnRuntime'
+import type { MeasureExecution } from '../../runtime/measure/measureRuntime'
 import { NotebookCellCard } from '../NotebookCellCard'
 import { CalculatedColumnCellCard } from './CalculatedColumnCellCard'
 import { DataCellCard } from './DataCellCard'
+import { MeasureCellCard } from './MeasureCellCard'
 import { ModelCellCard } from './ModelCellCard'
 
 interface NotebookCellProps {
@@ -29,9 +31,15 @@ interface NotebookCellProps {
     patch: { name?: string; expression?: string },
   ) => Promise<{ calculatedColumn?: CalculatedColumn; execution?: CalculatedColumnExecution; diagnostics: ExpressionDiagnostic[] }>
   onRemoveCalculatedColumnCell: (cellId: string) => void
+  onUpdateMeasure: (
+    modelId: string,
+    measureId: string,
+    patch: { name?: string; expression?: string },
+  ) => Promise<{ measure?: Measure; execution?: MeasureExecution; diagnostics: ExpressionDiagnostic[] }>
+  onRemoveMeasureCell: (cellId: string) => void
 }
 
-/** Dispatches a notebook cell to its renderer. `data`, `model` and `calculated-column` are functional so far. */
+/** Dispatches a notebook cell to its renderer. `data`, `model`, `calculated-column` and `measure` are functional so far. */
 export function NotebookCell({
   cell,
   datasets,
@@ -46,6 +54,8 @@ export function NotebookCell({
   onSetRelationshipActive,
   onUpdateCalculatedColumn,
   onRemoveCalculatedColumnCell,
+  onUpdateMeasure,
+  onRemoveMeasureCell,
 }: NotebookCellProps) {
   if (cell.kind === 'data') {
     const dataset = datasets[cell.datasetId]
@@ -79,6 +89,19 @@ export function NotebookCell({
         datasets={datasets}
         onUpdate={(patch) => onUpdateCalculatedColumn(cell.modelId, cell.calculatedColumnId, patch)}
         onRemove={() => onRemoveCalculatedColumnCell(cell.id)}
+      />
+    )
+  }
+
+  if (cell.kind === 'measure') {
+    const model = models[cell.modelId]
+    return (
+      <MeasureCellCard
+        cell={cell}
+        model={model}
+        datasets={datasets}
+        onUpdate={(patch) => onUpdateMeasure(cell.modelId, cell.measureId, patch)}
+        onRemove={() => onRemoveMeasureCell(cell.id)}
       />
     )
   }

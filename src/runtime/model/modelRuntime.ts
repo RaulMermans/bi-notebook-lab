@@ -18,9 +18,20 @@ export function createModel(name = 'Untitled Model'): SemanticModel {
     tables: [],
     relationships: [],
     calculatedColumns: [],
+    measures: [],
     createdAt: now,
     updatedAt: now,
   }
+}
+
+/**
+ * Normalizes a `SemanticModel` loaded from persistence: models saved before
+ * Sprint 4 have no `measures` field on disk at all. Always route a persisted
+ * model through this before treating it as a real `SemanticModel` — see
+ * docs/MEASURES.md "Persistence".
+ */
+export function hydrateSemanticModel(model: SemanticModel): SemanticModel {
+  return { ...model, measures: model.measures ?? [] }
 }
 
 function touch(): Pick<SemanticModel, 'updatedAt'> {

@@ -75,17 +75,27 @@ implementation details.
 
 ---
 
-## Phase 4 — Measures
+## Phase 4 — Measures ✅ complete
 
-- measure registry
-- aggregation functions
-- measure references
-- filter context
-- relationship propagation
-- basic `CALCULATE`
-- execution trace
+- measure registry (`SemanticModel.measures`, `MeasureCell`), reusing the
+  Sprint 3 parser/AST via a second binder (`bindMeasureExpression`)
+- aggregation functions: `SUM`, `AVERAGE`, `MIN`, `MAX`, `COUNT`,
+  `COUNTROWS`, `DISTINCTCOUNT`, `DIVIDE`
+- measure references (`[Measure Name]`) with dependency-graph cycle
+  detection (shared with the relationship-graph cycle check)
+- an explicit `FilterContext` (direct equality/set filters, AND-combined)
+- relationship propagation: one → many, transitive to a fixed point,
+  inactive relationships skipped, fails closed on an invalid
+  (`ACTIVE_CYCLE`/`AMBIGUOUS_PATH`) relationship graph
+- execution trace: filter context, relationship propagation, aggregation
+  and measure-reference nodes on the same `ExecutionTraceNode` shape
+- `CALCULATE`/`FILTER`/time intelligence remain **out of scope** — Phase 4
+  proves the measure-execution architecture those will plug into later
 
-**Exit:** learner can create useful measures and see why they evaluate as they do.
+**Exit:** learner can create useful measures and see why they evaluate as
+they do. See [`docs/MEASURES.md`](./docs/MEASURES.md) and
+[`docs/FILTER_CONTEXT.md`](./docs/FILTER_CONTEXT.md) for implementation
+details.
 
 ---
 
@@ -105,11 +115,18 @@ implementation details.
 
 ## Phase 6 — Context Visualizer
 
-- current filter context panel
-- row context panel
-- relationship propagation trace
-- measure execution trace
-- before/after context comparison
+Phase 4 already shipped a minimal, per-measure version of most of this
+(`MeasureCellCard`'s filter-context panel, no-filter/current-context
+comparison, and trace visualizer — see `docs/FILTER_CONTEXT.md` "UI").
+What remains is making it a first-class, reusable surface rather than
+embedded editor state:
+
+- a standalone filter-context panel reusable outside a single measure cell
+- row context panel (calculated columns already have one — Sprint 3)
+- richer relationship-propagation trace visualization (diagram, not just
+  a trace-tree node)
+- before/after context comparison as its own component, not embedded in
+  `MeasureCellCard`
 
 **Exit:** hidden BI mechanics become visually understandable.
 

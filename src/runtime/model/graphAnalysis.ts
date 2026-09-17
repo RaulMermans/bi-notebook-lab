@@ -1,20 +1,24 @@
 import type { Dataset } from '../../domain/data'
 import type { ModelDiagnostic, ModelTable, Relationship, SemanticModel } from '../../domain/model'
+import { detectCycle } from '../../lib/graph/cycle'
 import { resolveTableRef } from './modelRuntime'
 
-function activeRelationships(model: SemanticModel): Relationship[] {
+export function activeRelationships(model: SemanticModel): Relationship[] {
   return model.relationships.filter((r) => r.active)
 }
 
-function modelTableFor(model: SemanticModel, ref: { datasetId: string; tableId: string }): ModelTable | undefined {
+export function modelTableFor(model: SemanticModel, ref: { datasetId: string; tableId: string }): ModelTable | undefined {
   return model.tables.find((t) => t.datasetId === ref.datasetId && t.tableId === ref.tableId)
 }
 
 /**
  * Directed edge = active relationship, many → one (a fact-like row "looks
  * up" its dimension). Cycles here mean a lookup chain loops back on itself.
+ * Exported so `runtime/measure/filterPropagation.ts` can walk the same graph
+ * in the opposite direction (one → many) for filter propagation, rather than
+ * building a third adjacency map (docs/FILTER_CONTEXT.md).
  */
-function directedActiveGraph(model: SemanticModel): Map<string, Set<string>> {
+export function directedActiveGraph(model: SemanticModel): Map<string, Set<string>> {
   const graph = new Map<string, Set<string>>()
   for (const table of model.tables) graph.set(table.id, new Set())
 
@@ -33,7 +37,7 @@ function directedActiveGraph(model: SemanticModel): Map<string, Set<string>> {
  * inherently undirected (a diamond A→B, A→C, B→C gives B two ways to reach
  * A: directly, and via C).
  */
-function undirectedActiveEdges(model: SemanticModel): Map<string, Set<string>> {
+export function undirectedActiveEdges(model: SemanticModel): Map<string, Set<string>> {
   const graph = new Map<string, Set<string>>()
   for (const table of model.tables) graph.set(table.id, new Set())
 
@@ -45,52 +49,6 @@ function undirectedActiveEdges(model: SemanticModel): Map<string, Set<string>> {
     graph.get(oneTable.id)?.add(manyTable.id)
   }
   return graph
-}
-
-interface CycleResult {
-  found: boolean
-  path: string[]
-}
-
-/** Standard white/gray/black DFS cycle detection over a directed graph. */
-function detectCycle(graph: Map<string, Set<string>>): CycleResult {
-  const WHITE = 0
-  const GRAY = 1
-  const BLACK = 2
-  const color = new Map<string, number>()
-  for (const node of graph.keys()) color.set(node, WHITE)
-
-  const stack: string[] = []
-
-  function visit(node: string): string[] | undefined {
-    color.set(node, GRAY)
-    stack.push(node)
-
-    for (const neighbor of graph.get(node) ?? []) {
-      const neighborColor = color.get(neighbor)
-      if (neighborColor === GRAY) {
-        const cycleStart = stack.indexOf(neighbor)
-        return [...stack.slice(cycleStart), neighbor]
-      }
-      if (neighborColor === WHITE) {
-        const found = visit(neighbor)
-        if (found) return found
-      }
-    }
-
-    stack.pop()
-    color.set(node, BLACK)
-    return undefined
-  }
-
-  for (const node of graph.keys()) {
-    if (color.get(node) === WHITE) {
-      const found = visit(node)
-      if (found) return { found: true, path: found }
-    }
-  }
-
-  return { found: false, path: [] }
 }
 
 /**

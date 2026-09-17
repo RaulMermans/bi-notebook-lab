@@ -55,6 +55,7 @@ function deriveNodes(model: SemanticModel, datasets: Record<string, Dataset>): M
         columns: resolved?.table.columns ?? [],
         keyColumnIds: keyColumnIdsFor(model, table),
         calculatedColumns: model.calculatedColumns.filter((c) => c.modelTableId === table.id),
+        measures: model.measures.filter((m) => m.homeModelTableId === table.id),
       },
     }
   })

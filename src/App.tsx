@@ -1,4 +1,5 @@
 import { CreateCalculatedColumnPanel } from './components/notebook/CreateCalculatedColumnPanel'
+import { CreateMeasurePanel } from './components/notebook/CreateMeasurePanel'
 import { ImportDataPanel } from './components/notebook/ImportDataPanel'
 import { NotebookCell } from './components/notebook/NotebookCell'
 import { useNotebookRuntime } from './runtime/notebook/useNotebookRuntime'
@@ -55,6 +56,8 @@ export default function App() {
                 onSetRelationshipActive={actions.setRelationshipActive}
                 onUpdateCalculatedColumn={actions.updateCalculatedColumn}
                 onRemoveCalculatedColumnCell={actions.removeCalculatedColumnCell}
+                onUpdateMeasure={actions.updateMeasure}
+                onRemoveMeasureCell={actions.removeMeasureCell}
               />
             ))}
             <div className="notebook__add-actions">
@@ -63,6 +66,7 @@ export default function App() {
                 + New model
               </button>
               <CreateCalculatedColumnPanel models={models} datasets={datasets} onCreate={actions.createCalculatedColumnCell} />
+              <CreateMeasurePanel models={models} datasets={datasets} onCreate={actions.createMeasureCell} />
             </div>
           </div>
         )}
