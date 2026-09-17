@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { ModelCell, NotebookCell } from '../../domain/notebook'
+import type { CalculatedColumnCell, ModelCell, NotebookCell } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
 import type { ColumnRef, TableRef } from '../../domain/model'
 import { deleteDataset, loadDatasets, loadNotebook, saveDataset, saveNotebook } from '../../persistence/notebookStore'
 import { deleteModel, loadModels, saveModel } from '../../persistence/modelStore'
+import type { CalculatedColumnInput } from '../calculatedColumn/calculatedColumnRuntime'
 import { NotebookRuntime, emptyNotebook } from './notebookRuntime'
 
 export type HydrationStatus = 'loading' | 'ready'
@@ -111,6 +112,28 @@ export function useNotebookRuntime() {
         runtime.setRelationshipActive(modelId, relationshipId, active)
         const model = runtime.getModel(modelId)
         if (model) await saveModel(model)
+      },
+      async createCalculatedColumnCell(modelId: string, input: CalculatedColumnInput) {
+        const result = runtime.createCalculatedColumnCell(modelId, input)
+        const model = runtime.getModel(modelId)
+        if (result.cell && model) await saveModel(model)
+        return result
+      },
+      async updateCalculatedColumn(modelId: string, calculatedColumnId: string, patch: { name?: string; expression?: string }) {
+        const result = runtime.updateCalculatedColumn(modelId, calculatedColumnId, patch)
+        const model = runtime.getModel(modelId)
+        if (result.calculatedColumn && model) await saveModel(model)
+        return result
+      },
+      async removeCalculatedColumnCell(cellId: string): Promise<void> {
+        const cell = runtime.getSnapshot().notebook.cells.find(
+          (c): c is CalculatedColumnCell => c.id === cellId && c.kind === 'calculated-column',
+        )
+        runtime.removeCalculatedColumnCell(cellId)
+        if (cell) {
+          const model = runtime.getModel(cell.modelId)
+          if (model) await saveModel(model)
+        }
       },
     }),
     [runtime],

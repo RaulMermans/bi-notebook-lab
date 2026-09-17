@@ -1,3 +1,5 @@
+import type { DataType } from './data'
+
 export interface TableRef {
   datasetId: string
   tableId: string
@@ -32,11 +34,30 @@ export interface Relationship {
   createdAt: string
 }
 
+/**
+ * A row-level expression evaluated against every row of `modelTableId`. The
+ * definition (this struct) is the only thing persisted — see
+ * `CalculatedColumnExecution` in `runtime/calculatedColumn` for the
+ * (unpersisted, recomputable) evaluated output. Belongs to the semantic
+ * model, never to the underlying `Dataset`/`DataTable` — Sprint 3 never
+ * mutates imported rows to fake a calculated column as a physical one.
+ */
+export interface CalculatedColumn {
+  id: string
+  modelTableId: string
+  name: string
+  expression: string
+  dataType: DataType | 'unknown'
+  createdAt: string
+  updatedAt: string
+}
+
 export interface SemanticModel {
   id: string
   name: string
   tables: ModelTable[]
   relationships: Relationship[]
+  calculatedColumns: CalculatedColumn[]
   createdAt: string
   updatedAt: string
 }

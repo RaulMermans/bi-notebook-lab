@@ -30,11 +30,12 @@ export const sampleNotebook: NotebookDocument = {
       status: 'idle',
     },
     {
+      // Illustrative placeholder: see note above — no real CalculatedColumn yet.
       id: 'column',
       kind: 'calculated-column',
       title: 'Calculated Column',
-      prompt: 'Create Sales[Margin] as Revenue minus Cost.',
-      source: 'Margin = Sales[Revenue] - Sales[Cost]',
+      modelId: 'sample-retail-model',
+      calculatedColumnId: 'sample-margin-column',
       status: 'idle',
     },
     {

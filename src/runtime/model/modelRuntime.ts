@@ -17,6 +17,7 @@ export function createModel(name = 'Untitled Model'): SemanticModel {
     name,
     tables: [],
     relationships: [],
+    calculatedColumns: [],
     createdAt: now,
     updatedAt: now,
   }
@@ -35,7 +36,7 @@ export function addTable(model: SemanticModel, ref: TableRef): SemanticModel {
   return { ...model, tables: [...model.tables, modelTable], ...touch() }
 }
 
-/** Removes a table and any relationships (in either role) that reference it. */
+/** Removes a table and any relationships (in either role) or calculated columns that reference it. */
 export function removeTable(model: SemanticModel, modelTableId: string): SemanticModel {
   const table = model.tables.find((t) => t.id === modelTableId)
   if (!table) return model
@@ -46,7 +47,8 @@ export function removeTable(model: SemanticModel, modelTableId: string): Semanti
       !(r.one.datasetId === table.datasetId && r.one.tableId === table.tableId) &&
       !(r.many.datasetId === table.datasetId && r.many.tableId === table.tableId),
   )
-  return { ...model, tables, relationships, ...touch() }
+  const calculatedColumns = model.calculatedColumns.filter((c) => c.modelTableId !== modelTableId)
+  return { ...model, tables, relationships, calculatedColumns, ...touch() }
 }
 
 export function moveTable(model: SemanticModel, modelTableId: string, position: { x: number; y: number }): SemanticModel {

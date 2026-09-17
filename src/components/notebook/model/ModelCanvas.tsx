@@ -54,6 +54,7 @@ function deriveNodes(model: SemanticModel, datasets: Record<string, Dataset>): M
         tableName: resolved?.table.name ?? 'Missing table',
         columns: resolved?.table.columns ?? [],
         keyColumnIds: keyColumnIdsFor(model, table),
+        calculatedColumns: model.calculatedColumns.filter((c) => c.modelTableId === table.id),
       },
     }
   })

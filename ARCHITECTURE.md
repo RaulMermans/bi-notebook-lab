@@ -126,21 +126,58 @@ wrappers around the pure functions. See
 [`docs/MODEL_RUNTIME.md`](./docs/MODEL_RUNTIME.md) for the full
 relationship-validation, graph-diagnostic, and persistence design.
 
+## Sprint 3 implementation (Expression Engine + Calculated Columns)
+
+```text
+expression/               Framework-free expression engine, reused by
+                           calculated columns now and measures in Sprint 4:
+  ast.ts                   Expression AST node contracts + source spans
+  lexer.ts, parser.ts      Hand-written tokenizer/parser (no eval/new Function)
+  diagnostics.ts           ExpressionDiagnostic contract + codes
+  binder.ts                Resolves AST names -> stable ColumnRefs/relationships
+  relatedLookup.ts          RELATED relationship resolution + indexed lookup
+  evaluator.ts             Executes a bound expression against a RowContext
+  rowContext.ts            RowContext contract
+  trace.ts                 ExecutionTraceNode contract
+
+runtime/calculatedColumn/  calculatedColumnRuntime.ts: create/update/remove/
+                           evaluate/validate a CalculatedColumn (pure
+                           functions, same shape as runtime/model/modelRuntime.ts)
+
+components/notebook/       CalculatedColumnCellCard.tsx, CreateCalculatedColumnPanel.tsx
+components/notebook/
+  calculatedColumn/         ExpressionEditor, CalculatedColumnPreview,
+                            RowContextVisualizer
+
+domain/model.ts             CalculatedColumn + SemanticModel.calculatedColumns
+domain/notebook.ts           CalculatedColumnCell (real cell kind, not generic)
+```
+
+`CalculatedColumn` definitions persist inside `SemanticModel` — no new
+persistence store was needed, since `modelStore.ts` already round-trips
+the whole model. Execution output (computed values, row errors, traces)
+is never persisted; it's recomputed from current model/dataset state on
+every render, mirroring how `graphAnalysis.ts#validateModel` is
+recomputed rather than cached. See
+[`docs/EXPRESSION_ENGINE.md`](./docs/EXPRESSION_ENGINE.md) and
+[`docs/CALCULATED_COLUMNS.md`](./docs/CALCULATED_COLUMNS.md) for the full
+design.
+
 ## Expression strategy
 
-Do not implement full DAX initially.
+Do not implement full DAX.
 
-Start with a constrained grammar supporting concepts needed for foundational exercises, for example:
+Sprint 3 implements a constrained scalar grammar: numeric/string/boolean
+literals, parentheses, `+ - * /`, unary `-`, `Table[Column]`/`[Column]`
+references, and `RELATED(Table[Column])` — see
+[`docs/EXPRESSION_ENGINE.md`](./docs/EXPRESSION_ENGINE.md) for the exact
+grammar ("BI Notebook DAX Subset — Sprint 3").
 
-- `SUM`
-- `COUNT`
-- `COUNTROWS`
-- `DISTINCTCOUNT`
-- `AVERAGE`
-- `DIVIDE`
-- `RELATED`
-- `CALCULATE`
-- simple boolean filters
-- arithmetic
+Sprint 4 (Measures) is expected to extend the *same* parser/AST/binder/
+diagnostics/trace modules with aggregation and filter-context semantics
+(`SUM`, `COUNTROWS`, `DISTINCTCOUNT`, `AVERAGE`, `DIVIDE`, `CALCULATE`,
+simple boolean filters) rather than introducing a second expression
+system — if it can't be reused for measures, Sprint 3 built the wrong
+abstraction.
 
 The language may look DAX-like, but semantics and supported functions must be explicit.

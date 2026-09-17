@@ -1,3 +1,4 @@
+import { CreateCalculatedColumnPanel } from './components/notebook/CreateCalculatedColumnPanel'
 import { ImportDataPanel } from './components/notebook/ImportDataPanel'
 import { NotebookCell } from './components/notebook/NotebookCell'
 import { useNotebookRuntime } from './runtime/notebook/useNotebookRuntime'
@@ -52,6 +53,8 @@ export default function App() {
                 onCreateRelationship={actions.createRelationship}
                 onRemoveRelationship={actions.removeRelationship}
                 onSetRelationshipActive={actions.setRelationshipActive}
+                onUpdateCalculatedColumn={actions.updateCalculatedColumn}
+                onRemoveCalculatedColumnCell={actions.removeCalculatedColumnCell}
               />
             ))}
             <div className="notebook__add-actions">
@@ -59,6 +62,7 @@ export default function App() {
               <button type="button" className="secondary-button" onClick={() => actions.createModelCell()}>
                 + New model
               </button>
+              <CreateCalculatedColumnPanel models={models} datasets={datasets} onCreate={actions.createCalculatedColumnCell} />
             </div>
           </div>
         )}

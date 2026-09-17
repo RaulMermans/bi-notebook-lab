@@ -9,6 +9,7 @@ function fakeModel(id: string): SemanticModel {
     name: id,
     tables: [{ id: `${id}-table`, datasetId: 'ds1', tableId: 'ds1-table', position: { x: 10, y: 20 } }],
     relationships: [],
+    calculatedColumns: [],
     createdAt: now,
     updatedAt: now,
   }

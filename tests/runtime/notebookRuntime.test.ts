@@ -102,4 +102,89 @@ describe('NotebookRuntime', () => {
     expect(snapshot.notebook.cells).toHaveLength(0)
     expect(snapshot.models[model.id]).toBeUndefined()
   })
+
+  function withSalesModel() {
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
+    const sales = fakeDataset('sales-ds', 'Sales')
+    sales.tables[0].columns = [
+      { id: 'revenue-col', name: 'Revenue', dataType: 'integer', nullable: false },
+      { id: 'cost-col', name: 'Cost', dataType: 'integer', nullable: false },
+    ]
+    sales.tables[0].rows = [{ Revenue: 120, Cost: 80 }]
+    sales.tables[0].rowCount = 1
+    runtime.importDataset(sales)
+
+    const { model } = runtime.createModelCell('Retail')
+    runtime.addTableToModel(model.id, { datasetId: sales.id, tableId: sales.tables[0].id })
+    const salesTableId = runtime.getModel(model.id)!.tables[0].id
+    return { runtime, model, salesTableId }
+  }
+
+  it('creates a CalculatedColumnCell only when the expression validates, and appends it to both notebook and model', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+
+    const result = runtime.createCalculatedColumnCell(model.id, {
+      modelTableId: salesTableId,
+      name: 'Margin',
+      expression: 'Sales[Revenue] - Sales[Cost]',
+    })
+
+    expect(result.diagnostics).toEqual([])
+    const snapshot = runtime.getSnapshot()
+    // withSalesModel already produced a DataCell + a ModelCell before this call.
+    expect(snapshot.notebook.cells).toHaveLength(3)
+    expect(snapshot.notebook.cells[2]).toMatchObject({
+      kind: 'calculated-column',
+      modelId: model.id,
+      calculatedColumnId: result.calculatedColumn!.id,
+      title: 'Margin',
+    })
+    expect(snapshot.models[model.id].calculatedColumns).toHaveLength(1)
+  })
+
+  it('does not create a cell when the calculated column fails to validate', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+
+    const result = runtime.createCalculatedColumnCell(model.id, {
+      modelTableId: salesTableId,
+      name: 'Margin',
+      expression: 'Sales[Nope]',
+    })
+
+    expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'UNKNOWN_COLUMN' })])
+    const snapshot = runtime.getSnapshot()
+    expect(snapshot.notebook.cells).toHaveLength(2) // just the DataCell + ModelCell
+    expect(snapshot.models[model.id].calculatedColumns).toHaveLength(0)
+  })
+
+  it('updates a calculated column and renames its cell to match', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+    const created = runtime.createCalculatedColumnCell(model.id, {
+      modelTableId: salesTableId,
+      name: 'Margin',
+      expression: 'Sales[Revenue] - Sales[Cost]',
+    })
+
+    const updated = runtime.updateCalculatedColumn(model.id, created.calculatedColumn!.id, { name: 'Profit' })
+
+    expect(updated.diagnostics).toEqual([])
+    const snapshot = runtime.getSnapshot()
+    expect(snapshot.notebook.cells[2].title).toBe('Profit')
+    expect(snapshot.models[model.id].calculatedColumns[0].name).toBe('Profit')
+  })
+
+  it('removes a CalculatedColumnCell and its definition together', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+    const created = runtime.createCalculatedColumnCell(model.id, {
+      modelTableId: salesTableId,
+      name: 'Margin',
+      expression: 'Sales[Revenue] - Sales[Cost]',
+    })
+
+    runtime.removeCalculatedColumnCell(created.cell!.id)
+
+    const snapshot = runtime.getSnapshot()
+    expect(snapshot.notebook.cells).toHaveLength(2)
+    expect(snapshot.models[model.id].calculatedColumns).toHaveLength(0)
+  })
 })

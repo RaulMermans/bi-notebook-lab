@@ -1,7 +1,10 @@
 import type { NotebookCell as NotebookCellModel } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
-import type { ColumnRef, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
+import type { CalculatedColumn, ColumnRef, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
+import type { ExpressionDiagnostic } from '../../expression/diagnostics'
+import type { CalculatedColumnExecution } from '../../runtime/calculatedColumn/calculatedColumnRuntime'
 import { NotebookCellCard } from '../NotebookCellCard'
+import { CalculatedColumnCellCard } from './CalculatedColumnCellCard'
 import { DataCellCard } from './DataCellCard'
 import { ModelCellCard } from './ModelCellCard'
 
@@ -20,9 +23,15 @@ interface NotebookCellProps {
   ) => Promise<RelationshipDiagnostic[]>
   onRemoveRelationship: (modelId: string, relationshipId: string) => void
   onSetRelationshipActive: (modelId: string, relationshipId: string, active: boolean) => void
+  onUpdateCalculatedColumn: (
+    modelId: string,
+    calculatedColumnId: string,
+    patch: { name?: string; expression?: string },
+  ) => Promise<{ calculatedColumn?: CalculatedColumn; execution?: CalculatedColumnExecution; diagnostics: ExpressionDiagnostic[] }>
+  onRemoveCalculatedColumnCell: (cellId: string) => void
 }
 
-/** Dispatches a notebook cell to its renderer. Only `data` and `model` are functional so far. */
+/** Dispatches a notebook cell to its renderer. `data`, `model` and `calculated-column` are functional so far. */
 export function NotebookCell({
   cell,
   datasets,
@@ -35,6 +44,8 @@ export function NotebookCell({
   onCreateRelationship,
   onRemoveRelationship,
   onSetRelationshipActive,
+  onUpdateCalculatedColumn,
+  onRemoveCalculatedColumnCell,
 }: NotebookCellProps) {
   if (cell.kind === 'data') {
     const dataset = datasets[cell.datasetId]
@@ -55,6 +66,19 @@ export function NotebookCell({
         onCreateRelationship={(input) => onCreateRelationship(cell.modelId, input)}
         onRemoveRelationship={(relationshipId) => onRemoveRelationship(cell.modelId, relationshipId)}
         onSetRelationshipActive={(relationshipId, active) => onSetRelationshipActive(cell.modelId, relationshipId, active)}
+      />
+    )
+  }
+
+  if (cell.kind === 'calculated-column') {
+    const model = models[cell.modelId]
+    return (
+      <CalculatedColumnCellCard
+        cell={cell}
+        model={model}
+        datasets={datasets}
+        onUpdate={(patch) => onUpdateCalculatedColumn(cell.modelId, cell.calculatedColumnId, patch)}
+        onRemove={() => onRemoveCalculatedColumnCell(cell.id)}
       />
     )
   }

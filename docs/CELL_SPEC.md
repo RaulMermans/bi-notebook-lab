@@ -44,12 +44,30 @@ Expected output:
 - structural validation
 
 ### CalculatedColumnCell
-Creates a row-level expression.
+Creates a row-level expression. Backed by a real domain/execution contract
+since Sprint 3 — see [`../docs/CALCULATED_COLUMNS.md`](../docs/CALCULATED_COLUMNS.md)
+and [`../docs/EXPRESSION_ENGINE.md`](../docs/EXPRESSION_ENGINE.md).
+
+Contract (`src/domain/notebook.ts`):
+```ts
+interface CalculatedColumnCell extends BaseNotebookCell {
+  kind: 'calculated-column'
+  modelId: string
+  calculatedColumnId: string
+}
+```
+Both ids are always required — the cell stores references only; the
+`CalculatedColumn` definition (name, expression, target table, inferred
+type) lives in `SemanticModel.calculatedColumns`. There is no draft cell:
+an expression that fails to parse or bind stays in UI-only editor state
+until it validates.
 
 Expected output:
-- column definition
-- preview values
-- row-context trace
+- column definition (persisted)
+- preview values (first ~100 rows, recomputed from current model/dataset
+  state — never persisted)
+- row-context trace (real runtime execution trace, not a UI-reconstructed
+  explanation)
 
 ### MeasureCell
 Creates a context-sensitive aggregation.

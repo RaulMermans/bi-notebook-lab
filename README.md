@@ -41,12 +41,13 @@ The first product milestone is not a dashboard builder. It is a **learning runti
 
 ## Repository status
 
-Sprint 1 (Data Runtime) and Sprint 2 (Semantic Model Runtime) are complete.
-This repository now contains:
+Sprint 1 (Data Runtime), Sprint 2 (Semantic Model Runtime) and Sprint 3
+(Calculated Columns & Row Context) are complete. This repository now
+contains:
 
 - product and architecture contracts
 - notebook/cell domain types as a discriminated union, including functional
-  `DataCell` and `ModelCell` kinds
+  `DataCell`, `ModelCell` and `CalculatedColumnCell` kinds
 - a working data import pipeline: CSV, Excel (multi-sheet), and a built-in
   sample retail dataset
 - deterministic type inference and column profiling
@@ -56,11 +57,18 @@ This repository now contains:
   and topology-based fact/dimension inference
 - a visual model canvas (React Flow) that renders and repositions the model
   — the model itself, not the canvas, is the source of truth
-- local persistence (IndexedDB) so a notebook, its datasets, and its
-  semantic models all survive a reload
+- a reusable expression engine (parser → AST → binder → evaluator →
+  execution trace) that actually executes a bounded Power BI-style scalar
+  grammar row by row, including `RELATED` through active relationships,
+  with structured diagnostics and a row-context visualizer
+- local persistence (IndexedDB) so a notebook, its datasets, its semantic
+  models, and their calculated columns all survive a reload
 
-Calculated columns, measures, DAX and filter-context execution are **not**
-implemented yet — that starts in Sprint 3.
+Measures, filter context and `CALCULATE` are **not** implemented yet —
+that starts in Sprint 4. See
+[`docs/EXPRESSION_ENGINE.md`](./docs/EXPRESSION_ENGINE.md) and
+[`docs/CALCULATED_COLUMNS.md`](./docs/CALCULATED_COLUMNS.md) for the
+Sprint 3 design.
 
 ## Run locally
 
@@ -71,7 +79,9 @@ npm run dev
 
 Then either import a `.csv`/`.xlsx` file or click **Load Retail Dataset** to
 try the built-in sample. Add a Model cell to select tables into a semantic
-model and build a star schema (Customers/Products/Calendar 1:* Sales).
+model and build a star schema (Customers/Products/Calendar 1:* Sales), then
+use **+ New calculated column** to write a row-level expression such as
+`Sales[Revenue] - Sales[Cost]` or `RELATED(Products[Category])`.
 
 ## Core documents
 
@@ -83,6 +93,8 @@ model and build a star schema (Customers/Products/Calendar 1:* Sales).
 - [`docs/VALIDATION_ENGINE.md`](./docs/VALIDATION_ENGINE.md)
 - [`docs/DATA_RUNTIME.md`](./docs/DATA_RUNTIME.md)
 - [`docs/MODEL_RUNTIME.md`](./docs/MODEL_RUNTIME.md)
+- [`docs/EXPRESSION_ENGINE.md`](./docs/EXPRESSION_ENGINE.md)
+- [`docs/CALCULATED_COLUMNS.md`](./docs/CALCULATED_COLUMNS.md)
 
 ## Scope guardrail
 

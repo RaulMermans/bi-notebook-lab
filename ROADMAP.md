@@ -51,16 +51,27 @@ details.
 
 ---
 
-## Phase 3 — Calculated Columns
+## Phase 3 — Calculated Columns ✅ complete
 
-- row-level expression evaluator
-- arithmetic
-- field references
-- `RELATED`
-- preview computed values
-- row-context visualization
+- reusable expression engine: parser → AST → binder → evaluator → execution
+  trace, with structured diagnostics (no `eval`/`new Function`)
+- row-level expression evaluator with an explicit `RowContext`
+- arithmetic (`+ - * /`, unary `-`, parentheses, operator precedence)
+- field references (`Table[Column]` / `[Column]`), scoped to the
+  calculated column's own table — direct cross-table references are
+  rejected in favor of `RELATED`
+- `RELATED(Table[Column])` through active, unambiguous many→one
+  relationships, with an indexed one-side lookup (O(n), not O(n·m))
+- preview computed values (first ~100 rows, recomputed from live model
+  state, never persisted)
+- row-context visualization driven by the runtime's own execution trace
+- calculated columns persist inside `SemanticModel` and appear on the
+  model canvas with an `fx` badge
 
-**Exit:** learner can create and debug calculated columns.
+**Exit:** learner can create and debug calculated columns. See
+[`docs/EXPRESSION_ENGINE.md`](./docs/EXPRESSION_ENGINE.md) and
+[`docs/CALCULATED_COLUMNS.md`](./docs/CALCULATED_COLUMNS.md) for
+implementation details.
 
 ---
 

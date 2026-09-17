@@ -1,7 +1,10 @@
-import type { GenericNotebookCell, ModelCell, NotebookCell, NotebookDocument } from '../../domain/notebook'
+import type { CalculatedColumnCell, GenericNotebookCell, ModelCell, NotebookCell, NotebookDocument } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
-import type { ColumnRef, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
+import type { CalculatedColumn, ColumnRef, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
+import type { ExpressionDiagnostic } from '../../expression/diagnostics'
 import { generateId } from '../../lib/ids'
+import * as calculatedColumnRuntime from '../calculatedColumn/calculatedColumnRuntime'
+import type { CalculatedColumnExecution, CalculatedColumnInput } from '../calculatedColumn/calculatedColumnRuntime'
 import * as modelRuntime from '../model/modelRuntime'
 
 export interface NotebookRuntimeSnapshot {
@@ -197,5 +200,77 @@ export class NotebookRuntime {
     const model = this.getModel(modelId)
     if (!model) return
     this.commitModel(modelRuntime.setRelationshipActive(model, relationshipId, active))
+  }
+
+  /**
+   * Creates a `CalculatedColumn` definition on the model and, only if it
+   * validates (no error diagnostics), appends the `CalculatedColumnCell`
+   * that references it. A syntax/binding failure leaves both the model and
+   * the notebook unchanged — the diagnostics are returned so the caller
+   * (the create panel) can show them without ever creating a cell.
+   */
+  createCalculatedColumnCell(
+    modelId: string,
+    input: CalculatedColumnInput,
+  ): { cell?: CalculatedColumnCell; calculatedColumn?: CalculatedColumn; execution?: CalculatedColumnExecution; diagnostics: ExpressionDiagnostic[] } {
+    const model = this.getModel(modelId)
+    if (!model) return { diagnostics: [] }
+
+    const result = calculatedColumnRuntime.createCalculatedColumn(model, this.snapshot.datasets, input)
+    if (!result.calculatedColumn) {
+      return { diagnostics: result.diagnostics }
+    }
+
+    const cell: CalculatedColumnCell = {
+      id: generateId('cell'),
+      kind: 'calculated-column',
+      title: result.calculatedColumn.name,
+      modelId,
+      calculatedColumnId: result.calculatedColumn.id,
+      status: 'idle',
+    }
+    const cells = [...this.snapshot.notebook.cells, cell]
+    const models = { ...this.snapshot.models, [model.id]: result.model }
+    this.commit({ ...this.snapshot.notebook, cells }, this.snapshot.datasets, models)
+
+    return { cell, calculatedColumn: result.calculatedColumn, execution: result.execution, diagnostics: result.diagnostics }
+  }
+
+  /** Re-validates and re-evaluates an existing calculated column, updating its cell title if the name changed. */
+  updateCalculatedColumn(
+    modelId: string,
+    calculatedColumnId: string,
+    patch: { name?: string; expression?: string },
+  ): { calculatedColumn?: CalculatedColumn; execution?: CalculatedColumnExecution; diagnostics: ExpressionDiagnostic[] } {
+    const model = this.getModel(modelId)
+    if (!model) return { diagnostics: [] }
+
+    const result = calculatedColumnRuntime.updateCalculatedColumn(model, this.snapshot.datasets, calculatedColumnId, patch)
+    if (!result.calculatedColumn) {
+      return { diagnostics: result.diagnostics }
+    }
+
+    const cells = this.snapshot.notebook.cells.map((cell) =>
+      cell.kind === 'calculated-column' && cell.calculatedColumnId === calculatedColumnId
+        ? { ...cell, title: result.calculatedColumn!.name }
+        : cell,
+    )
+    const models = { ...this.snapshot.models, [model.id]: result.model }
+    this.commit({ ...this.snapshot.notebook, cells }, this.snapshot.datasets, models)
+
+    return { calculatedColumn: result.calculatedColumn, execution: result.execution, diagnostics: result.diagnostics }
+  }
+
+  /** Removes a CalculatedColumnCell and its underlying definition together. */
+  removeCalculatedColumnCell(cellId: string): void {
+    const cell = this.snapshot.notebook.cells.find((c) => c.id === cellId)
+    if (!cell || cell.kind !== 'calculated-column') return
+
+    const model = this.getModel(cell.modelId)
+    const cells = this.snapshot.notebook.cells.filter((c) => c.id !== cellId)
+    const models = model
+      ? { ...this.snapshot.models, [model.id]: calculatedColumnRuntime.removeCalculatedColumn(model, cell.calculatedColumnId) }
+      : this.snapshot.models
+    this.commit({ ...this.snapshot.notebook, cells }, this.snapshot.datasets, models)
   }
 }
