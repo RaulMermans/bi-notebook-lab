@@ -18,6 +18,8 @@ export interface NotebookCell {
   source?: string
   status?: CellStatus
   meta?: Record<string, unknown>
+  /** Set when kind === 'data': the Dataset this DataCell represents. */
+  datasetId?: string
 }
 
 export interface NotebookDocument {

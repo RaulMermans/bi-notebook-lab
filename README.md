@@ -41,15 +41,18 @@ The first product milestone is not a dashboard builder. It is a **learning runti
 
 ## Repository status
 
-This repository currently contains:
+Sprint 1 (Data Runtime) is complete. This repository now contains:
 
 - product and architecture contracts
-- notebook/cell domain types
-- a sample beginner notebook
-- a minimal React/Vite shell
-- roadmap and validation design
+- notebook/cell domain types, including a functional `DataCell`
+- a working data import pipeline: CSV, Excel (multi-sheet), and a built-in
+  sample retail dataset
+- deterministic type inference and column profiling
+- local persistence (IndexedDB) so a notebook survives a reload
+- roadmap and validation design for later sprints
 
-The shell is intentionally thin. The next work should go into the execution model, not visual polish.
+Relationships, calculated columns, measures, DAX, visuals and validation are
+**not** implemented yet — that starts in Sprint 2 (Semantic Modeling).
 
 ## Run locally
 
@@ -57,6 +60,9 @@ The shell is intentionally thin. The next work should go into the execution mode
 npm install
 npm run dev
 ```
+
+Then either import a `.csv`/`.xlsx` file or click **Load Retail Dataset** to
+try the built-in sample.
 
 ## Core documents
 
@@ -66,6 +72,7 @@ npm run dev
 - [`docs/CELL_SPEC.md`](./docs/CELL_SPEC.md)
 - [`docs/LEARNING_MODEL.md`](./docs/LEARNING_MODEL.md)
 - [`docs/VALIDATION_ENGINE.md`](./docs/VALIDATION_ENGINE.md)
+- [`docs/DATA_RUNTIME.md`](./docs/DATA_RUNTIME.md)
 
 ## Scope guardrail
 

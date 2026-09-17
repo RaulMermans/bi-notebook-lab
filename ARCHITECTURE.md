@@ -75,6 +75,30 @@ V1 should be local-first:
 
 A database is not required for the first usable version.
 
+## Sprint 1 implementation (Data Runtime)
+
+The layers above are realized concretely as:
+
+```text
+components/notebook/   UI: ImportDataPanel, DataCellCard, Table{Preview,Schema,Profile}
+runtime/notebook/      NotebookRuntime (pure) + useNotebookRuntime (React + persistence wiring)
+runtime/data/          dataRuntime.ts — import orchestration, limits, error surfacing
+lib/csv/, lib/excel/   File-format parsing (PapaParse, SheetJS) into a raw header/row grid
+lib/profiling/         Type inference, value coercion, column profiling
+lib/sample/            Deterministic seeded generator for the built-in retail dataset
+domain/data.ts         DataType, DataColumn, DataTable, Dataset contracts
+persistence/           IndexedDB notebook + dataset stores (idb-keyval)
+```
+
+`NotebookRuntime` holds no framework or persistence code — it is a plain,
+synchronously-testable class (`addCell`/`removeCell`/`moveCell`/
+`importDataset`/`removeDataset`/`updateCell`), matching the "keep BI
+semantics outside React components" guardrail. `DataCell` is represented as
+the existing `NotebookCell` with `kind: 'data'` and a `datasetId`, rather
+than a separate parallel type, since the notebook already models all cell
+kinds through one shape. See [`docs/DATA_RUNTIME.md`](./docs/DATA_RUNTIME.md)
+for the full import/type-inference/persistence design.
+
 ## Expression strategy
 
 Do not implement full DAX initially.

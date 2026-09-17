@@ -1,8 +1,12 @@
-import { NotebookCellCard } from './components/NotebookCellCard'
-import { sampleNotebook } from './data/sampleNotebook'
+import { ImportDataPanel } from './components/notebook/ImportDataPanel'
+import { NotebookCell } from './components/notebook/NotebookCell'
+import { useNotebookRuntime } from './runtime/notebook/useNotebookRuntime'
 import './styles/app.css'
 
 export default function App() {
+  const { notebook, datasets, status, actions } = useNotebookRuntime()
+  const hasCells = notebook.cells.length > 0
+
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -19,17 +23,27 @@ export default function App() {
         <header className="workspace__header">
           <div>
             <span className="eyebrow">BEGINNER · RETAIL</span>
-            <h1>{sampleNotebook.title}</h1>
-            <p>{sampleNotebook.description}</p>
+            <h1>{notebook.title}</h1>
+            <p>Import a dataset, inspect its schema and profile, then keep building on it.</p>
           </div>
-          <button className="secondary-button">Reset notebook</button>
         </header>
 
-        <div className="notebook">
-          {sampleNotebook.cells.map((cell) => (
-            <NotebookCellCard key={cell.id} cell={cell} />
-          ))}
-        </div>
+        {status === 'loading' ? (
+          <p className="workspace__status">Loading notebook…</p>
+        ) : !hasCells ? (
+          <div className="empty-state">
+            <h2>Add your first dataset</h2>
+            <p>Import a CSV or Excel file, or start from the built-in retail dataset.</p>
+            <ImportDataPanel onImportDataset={actions.importDataset} />
+          </div>
+        ) : (
+          <div className="notebook">
+            {notebook.cells.map((cell) => (
+              <NotebookCell key={cell.id} cell={cell} datasets={datasets} onRemoveDataset={actions.removeDataset} />
+            ))}
+            <ImportDataPanel onImportDataset={actions.importDataset} compact />
+          </div>
+        )}
       </section>
     </main>
   )

@@ -16,17 +16,19 @@
 
 ---
 
-## Phase 1 — Data Runtime
+## Phase 1 — Data Runtime ✅ complete
 
 - CSV import
-- XLSX import
+- XLSX import (multi-sheet)
 - schema/type inference
-- null/duplicate inspection
+- null/duplicate inspection (profiling)
 - table preview
-- grain/key hints
-- bundled lesson datasets
+- grain/key hints (potential-key detection)
+- bundled lesson dataset (built-in Retail sample: Customers/Products/Sales/Calendar)
+- local persistence (IndexedDB) across reloads
 
-**Exit:** DataCell can load, inspect and persist tables.
+**Exit:** DataCell can load, inspect and persist tables. See
+[`docs/DATA_RUNTIME.md`](./docs/DATA_RUNTIME.md) for implementation details.
 
 ---
 
