@@ -134,13 +134,18 @@ source. All of this renders through the shared `TraceNodeView` component
 
 ## UI
 
-`components/notebook/measure/FilterContextPanel.tsx` is a lightweight
+`components/context/ContextFilterEditor.tsx` — generalized in Sprint 6 from
+the original Sprint 4 `FilterContextPanel` — is a lightweight
 evaluation-context editor, not a report slicer: add/remove
 table+column+value filters, with a value picker sourced from the column's
 actual distinct values (capped at 200 — larger columns fall back to a
 free-text input, per the sprint brief's "avoid rendering tens of thousands
-of dropdown items"). `MeasureCellCard.tsx` shows a "No filters" vs.
-"Current context" comparison whenever at least one filter is active.
+of dropdown items"). It's shared by both `MeasureCellCard.tsx` (its "No
+filters" vs. "Current context" comparison) and the Sprint 6 `ContextExplorer`
+— there is only one implementation. See
+[`CONTEXT_VISUALIZER.md`](./CONTEXT_VISUALIZER.md) for the model-wide
+propagation visualization built on top of this same `FilterContext`/
+`ResolvedFilterState`.
 
 Filter context state is UI-only and never persisted — reloading the
 notebook always starts a measure back at "no filters", by design (spec

@@ -47,6 +47,17 @@ Questions:
 
 The UI should expose these layers explicitly instead of collapsing them behind a report canvas.
 
+## Context Explorer as a Level 4/5 teaching surface
+
+The Sprint 6 Context Explorer (see
+[`CONTEXT_VISUALIZER.md`](./CONTEXT_VISUALIZER.md)) is where Level 4
+("which filters are currently active? how does a measure change by visual
+context?") and Level 5 ("how do relationships change the effective row
+set?") questions get a direct, inspectable answer: picking a measure and a
+filter shows exactly which tables are directly filtered vs. propagated-into,
+in which direction, and what the measure's baseline vs. current result is —
+using the real Sprint 4 runtime, never a reconstructed explanation.
+
 ## Validation as feedback on these levels
 
 The Sprint 5 validation engine (see

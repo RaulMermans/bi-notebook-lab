@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import type { Dataset } from '../../../domain/data'
-import type { SemanticModel } from '../../../domain/model'
-import type { ColumnFilter } from '../../../runtime/measure/filterContext'
-import { resolveTableRef } from '../../../runtime/model/modelRuntime'
+import type { Dataset } from '../../domain/data'
+import type { SemanticModel } from '../../domain/model'
+import type { ColumnFilter } from '../../runtime/measure/filterContext'
+import { resolveTableRef } from '../../runtime/model/modelRuntime'
 
-interface FilterContextPanelProps {
+interface ContextFilterEditorProps {
   model: SemanticModel
   datasets: Record<string, Dataset>
   filters: ColumnFilter[]
@@ -35,11 +35,15 @@ function distinctColumnValues(datasets: Record<string, Dataset>, model: Semantic
 }
 
 /**
- * A lightweight evaluation-context editor for testing a measure under a
- * filter, not a report slicer (docs/FILTER_CONTEXT.md "Filter Context UI").
- * Filters here are transient UI state, never persisted (spec §53).
+ * A reusable, transient evaluation-context editor over `ColumnFilter[]` — the
+ * Sprint 6 generalization of the Sprint 4 `FilterContextPanel`, used by both
+ * `MeasureCellCard` and `ContextExplorer` (Sprint 6 brief §8 "Do not maintain
+ * two implementations"). Not a report slicer: add/remove table+column+value
+ * filters, with a value picker sourced from the column's actual distinct
+ * values (capped at 200 — larger columns fall back to free text). Filter
+ * selections are always transient UI state, never persisted (spec §9/§53).
  */
-export function FilterContextPanel({ model, datasets, filters, onChange }: FilterContextPanelProps) {
+export function ContextFilterEditor({ model, datasets, filters, onChange }: ContextFilterEditorProps) {
   const [draftTableId, setDraftTableId] = useState('')
   const [draftColumnId, setDraftColumnId] = useState('')
   const [draftValue, setDraftValue] = useState('')
@@ -84,26 +88,40 @@ export function FilterContextPanel({ model, datasets, filters, onChange }: Filte
   }
 
   return (
-    <div className="filter-context-panel">
-      <h4>Evaluation Context</h4>
+    <div className="context-filter-editor">
+      <h4>Current Context</h4>
 
-      {filters.length > 0 && (
-        <ul className="filter-context-panel__list">
+      {filters.length > 0 ? (
+        <ul className="context-filter-editor__chips">
           {filters.map((filter, index) => (
-            <li key={index}>
+            <li key={index} className="context-filter-chip">
               <span>
                 {tableLabel(filter.column)}[{columnLabel(filter.column)}] = {filter.values.map(formatFilterValue).join(', ')}
               </span>
-              <button type="button" className="text-button" onClick={() => handleRemoveFilter(index)}>
-                Remove
+              <button
+                type="button"
+                className="context-filter-chip__remove"
+                aria-label={`Remove filter ${tableLabel(filter.column)}[${columnLabel(filter.column)}]`}
+                onClick={() => handleRemoveFilter(index)}
+              >
+                ×
               </button>
             </li>
           ))}
         </ul>
+      ) : (
+        <p className="context-filter-editor__empty">No filters — showing the model's baseline result.</p>
       )}
 
-      <div className="filter-context-panel__draft">
+      {filters.length > 0 && (
+        <button type="button" className="text-button" onClick={() => onChange([])}>
+          Clear all
+        </button>
+      )}
+
+      <div className="context-filter-editor__draft">
         <select
+          aria-label="Filter table"
           value={draftTableId}
           onChange={(e) => {
             setDraftTableId(e.target.value)
@@ -120,6 +138,7 @@ export function FilterContextPanel({ model, datasets, filters, onChange }: Filte
         </select>
 
         <select
+          aria-label="Filter column"
           value={draftColumnId}
           onChange={(e) => {
             setDraftColumnId(e.target.value)
@@ -136,7 +155,7 @@ export function FilterContextPanel({ model, datasets, filters, onChange }: Filte
         </select>
 
         {pickerValues ? (
-          <select value={draftValue} onChange={(e) => setDraftValue(e.target.value)} disabled={!draftColumn}>
+          <select aria-label="Filter value" value={draftValue} onChange={(e) => setDraftValue(e.target.value)} disabled={!draftColumn}>
             <option value="">Value…</option>
             {pickerValues.map((value) => (
               <option key={String(value)} value={String(value)}>
@@ -146,6 +165,7 @@ export function FilterContextPanel({ model, datasets, filters, onChange }: Filte
           </select>
         ) : (
           <input
+            aria-label="Filter value"
             type="text"
             placeholder="Value…"
             value={draftValue}

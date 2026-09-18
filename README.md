@@ -42,8 +42,9 @@ The first product milestone is not a dashboard builder. It is a **learning runti
 ## Repository status
 
 Sprint 1 (Data Runtime), Sprint 2 (Semantic Model Runtime), Sprint 3
-(Calculated Columns & Row Context), Sprint 4 (Measures & Filter Context) and
-Sprint 5 (Validation Engine) are complete. This repository now contains:
+(Calculated Columns & Row Context), Sprint 4 (Measures & Filter Context),
+Sprint 5 (Validation Engine) and Sprint 6 (Context Visualizer) are complete.
+This repository now contains:
 
 - product and architecture contracts
 - notebook/cell domain types as a discriminated union, including functional
@@ -84,6 +85,13 @@ Sprint 5 (Validation Engine) are complete. This repository now contains:
 - `TestCell`, a real notebook cell backed by a persisted `ValidationSpec`
   (never a persisted score), and a built-in **Retail Foundations** checkpoint
   scoring up to 100 points
+- a **Context Explorer** (`[Model] [Context Explorer]` tab on a `ModelCell`):
+  pick any measure and any combination of filters and see, from the real
+  Sprint 4 runtime, the baseline-vs-current result, a relationship-
+  propagation diagram (visible/total rows, direct vs. propagated vs.
+  unfiltered, active/inactive relationship state, before/after impact), a
+  plain-English narrative at two detail levels, and a measure's dependency
+  chain when it references other measures
 
 `CALCULATE`, `FILTER`, bidirectional/many-to-many relationships and time
 intelligence are **not** implemented yet — see
@@ -114,6 +122,11 @@ scored checkpoint, then click **Check solution** to grade your model,
 `Margin` column, and measures against frozen expected results — including
 under several filter contexts, so a hardcoded number can't pass.
 
+Expand a Model cell and switch to its **Context Explorer** tab to pick any
+measure, add filters (e.g. `Customers[Country] = Spain`), and watch the
+relationship-propagation diagram, baseline/current comparison, and
+plain-English narrative update from the real runtime.
+
 ## Core documents
 
 - [`PRODUCT.md`](./PRODUCT.md)
@@ -128,6 +141,7 @@ under several filter contexts, so a hardcoded number can't pass.
 - [`docs/CALCULATED_COLUMNS.md`](./docs/CALCULATED_COLUMNS.md)
 - [`docs/MEASURES.md`](./docs/MEASURES.md)
 - [`docs/FILTER_CONTEXT.md`](./docs/FILTER_CONTEXT.md)
+- [`docs/CONTEXT_VISUALIZER.md`](./docs/CONTEXT_VISUALIZER.md)
 
 ## Scope guardrail
 

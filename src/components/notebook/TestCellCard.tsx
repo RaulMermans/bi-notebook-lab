@@ -143,6 +143,12 @@ export function TestCellCard({ cell, model, run, hasStaleRun, onRun, onRemove }:
                                 <li key={index} className={`diagnostic diagnostic--${f.severity === 'success' ? 'info' : f.severity}`}>
                                   {f.message}
                                   {f.hint && <div className="test-rule__hint">{f.hint}</div>}
+                                  {f.code === 'HINT_FILTER_CONTEXT' && (
+                                    <div className="test-rule__hint">
+                                      Explore context: open this checkpoint&apos;s Model cell → Context Explorer tab to see how filters
+                                      propagate to this measure&apos;s table.
+                                    </div>
+                                  )}
                                 </li>
                               ))}
                             </ul>

@@ -256,9 +256,11 @@ routes through it, so reloading an old notebook never crashes.
   existence (mirrors `CreateCalculatedColumnPanel.tsx`).
 - `MeasureCellCard.tsx` — expression editor, no-filter/current-context
   result comparison, and the evaluation-context panel below.
-- `components/notebook/measure/FilterContextPanel.tsx` — an
+- `components/context/ContextFilterEditor.tsx` — an
   add-filter/remove-filter editor over `ColumnFilter[]` (see
   `FILTER_CONTEXT.md`), with a value picker for low-cardinality columns.
+  Shared with the Sprint 6 `ContextExplorer` (see
+  [`CONTEXT_VISUALIZER.md`](./CONTEXT_VISUALIZER.md)).
 - `components/notebook/measure/MeasureTraceVisualizer.tsx` — renders the
   runtime's own `ExecutionTraceNode` tree (shared `TraceNodeView` component
   with the Sprint 3 row-context visualizer).

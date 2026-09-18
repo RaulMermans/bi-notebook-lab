@@ -17,6 +17,7 @@ export interface TableRowSummary {
 }
 
 export interface DirectFilterSummary {
+  modelTableId: string
   tableName: string
   columnName: string
   operator: ColumnFilter['operator']
@@ -88,6 +89,7 @@ function applyDirectFilters(
     rowSelections.set(modelTable.id, after)
 
     summaries.push({
+      modelTableId: modelTable.id,
       tableName: resolvedColumn.table.name,
       columnName: resolvedColumn.column.name,
       operator: filter.operator,

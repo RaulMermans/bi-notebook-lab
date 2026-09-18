@@ -13,6 +13,7 @@ import {
 import '@xyflow/react/dist/style.css'
 import type { Dataset } from '../../../domain/data'
 import type { SemanticModel } from '../../../domain/model'
+import { defaultTablePosition } from '../../../lib/layout/modelLayout'
 import { resolveTableRef } from '../../../runtime/model/modelRuntime'
 import { ModelTableNode, type ModelTableNodeType } from './ModelTableNode'
 import { RelationshipEdge, type RelationshipEdgeType } from './RelationshipEdge'
@@ -24,10 +25,6 @@ interface ModelCanvasProps {
   model: SemanticModel
   datasets: Record<string, Dataset>
   onMoveTable: (modelTableId: string, position: { x: number; y: number }) => void
-}
-
-function defaultPosition(index: number): { x: number; y: number } {
-  return { x: (index % 3) * 260, y: Math.floor(index / 3) * 220 }
 }
 
 function keyColumnIdsFor(model: SemanticModel, modelTable: SemanticModel['tables'][number]): Set<string> {
@@ -49,7 +46,7 @@ function deriveNodes(model: SemanticModel, datasets: Record<string, Dataset>): M
     return {
       id: table.id,
       type: 'modelTable',
-      position: table.position ?? defaultPosition(index),
+      position: table.position ?? defaultTablePosition(index),
       data: {
         tableName: resolved?.table.name ?? 'Missing table',
         columns: resolved?.table.columns ?? [],

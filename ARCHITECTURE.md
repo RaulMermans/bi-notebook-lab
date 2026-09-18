@@ -267,6 +267,64 @@ selector-resolution, rule-contract, scoring, staleness, and persistence
 design — including the mandatory hardcoded-measure regression proof that
 motivates multi-context measure validation in the first place.
 
+## Sprint 6 implementation (Context Visualizer)
+
+```text
+domain/context.ts               ContextAnalysis, ContextTableState,
+                                 ContextRelationshipState, MeasureContextComparison,
+                                 ContextFlowStep — a presentation contract, not a
+                                 second execution contract
+
+runtime/context/
+  contextAnalysis.ts             analyzeMeasureContext(): the single entry point —
+                                  composes two evaluateMeasure calls (baseline,
+                                  current) and the adapters below
+  graphAdapter.ts                buildTableStates / buildRelationshipStates —
+                                  adapt ResolvedFilterState into diagram-ready state
+  narrative.ts                   buildContextNarrative / buildBeginnerExplanation —
+                                  plain-English sequence/prose generated from the
+                                  same ResolvedFilterState + execution trace
+  comparison.ts                  compareMeasureResults — numeric-only delta/%
+
+runtime/measure/filterPropagation.ts   DirectFilterSummary + modelTableId (the one
+                                        additive field Sprint 6 needed; no filtering
+                                        behavior changed)
+
+lib/layout/modelLayout.ts       defaultTablePosition() — extracted from
+                                 ModelCanvas so the Context Explorer diagram
+                                 falls back to the same deterministic grid
+
+components/context/
+  ContextExplorer.tsx             top-level surface (measure picker + everything below)
+  ContextFilterEditor.tsx         generalized from Sprint 4's FilterContextPanel —
+                                   shared by MeasureCellCard and ContextExplorer
+  ContextPropagationDiagram.tsx   read-only @xyflow/react graph (reuses ModelCanvas's library)
+  ContextTableNode.tsx            table node: visible/total rows, %, state badge
+  ContextRelationshipEdge.tsx     relationship edge: 1 → * direction, state, impact
+  ContextComparison.tsx           baseline vs. current, delta/%
+  ContextDetailsPanel.tsx         table inspector / propagation-step inspector
+  ContextFlowNarrative.tsx        Explanation / Step-by-step toggle
+  MeasureDependencyTree.tsx       reuses shared TraceNodeView, conditional on dependency
+  RowVsFilterContextNote.tsx      static Row Context vs. Filter Context card
+
+components/notebook/ModelCellCard.tsx   + [Model] [Context Explorer] tabs;
+                                         both views stay mounted (hidden, not
+                                         unmounted) so a filter selection survives
+                                         switching tabs to toggle a relationship
+components/notebook/TestCellCard.tsx    + a manual "Explore context" pointer next
+                                         to a HINT_FILTER_CONTEXT feedback item
+                                         (no coupling to Validation Engine state)
+```
+
+Every number the Context Explorer renders is read from Sprint 4's own
+`ResolvedFilterState`/`MeasureExecution`/`ExecutionTraceNode` — `runtime/
+context/*.ts` contains no second filter-propagation algorithm and no second
+aggregation function. See
+[`docs/CONTEXT_VISUALIZER.md`](./docs/CONTEXT_VISUALIZER.md) for the full
+design, including a real pointer-events/accessibility pitfall (React Flow's
+edge-label/node wrappers set an inherited `pointer-events: none`) found and
+fixed during manual browser verification.
+
 ## Expression strategy
 
 Do not implement full DAX.

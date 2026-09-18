@@ -6,8 +6,8 @@ import type { ExpressionDiagnostic } from '../../expression/diagnostics'
 import type { ColumnFilter } from '../../runtime/measure/filterContext'
 import { evaluateMeasure, type MeasureExecution } from '../../runtime/measure/measureRuntime'
 import { resolveTableRef } from '../../runtime/model/modelRuntime'
+import { ContextFilterEditor } from '../context/ContextFilterEditor'
 import { ExpressionEditor } from './calculatedColumn/ExpressionEditor'
-import { FilterContextPanel } from './measure/FilterContextPanel'
 import { MeasureTraceVisualizer } from './measure/MeasureTraceVisualizer'
 
 interface MeasureCellCardProps {
@@ -148,7 +148,7 @@ export function MeasureCellCard({ cell, model, datasets, onUpdate, onRemove }: M
               runLabel="Run"
             />
 
-            <FilterContextPanel model={model} datasets={datasets} filters={filters} onChange={setFilters} />
+            <ContextFilterEditor model={model} datasets={datasets} filters={filters} onChange={setFilters} />
 
             {!hasErrors && activeExecution?.trace && <MeasureTraceVisualizer trace={activeExecution.trace} />}
           </div>

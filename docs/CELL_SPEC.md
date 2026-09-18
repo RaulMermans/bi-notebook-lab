@@ -43,6 +43,14 @@ Expected output:
 - semantic-model snapshot
 - structural validation
 
+Since Sprint 6, an expanded `ModelCell` also offers a `Context Explorer` tab
+alongside `Model` (`components/context/ContextExplorer.tsx`) — a reusable
+surface for exploring how any measure in the model responds to a learner-
+chosen `FilterContext`. See
+[`../docs/CONTEXT_VISUALIZER.md`](../docs/CONTEXT_VISUALIZER.md). This is
+presentation only: it does not change `ModelCell`'s domain contract or add
+persisted state.
+
 ### CalculatedColumnCell
 Creates a row-level expression. Backed by a real domain/execution contract
 since Sprint 3 — see [`../docs/CALCULATED_COLUMNS.md`](../docs/CALCULATED_COLUMNS.md)

@@ -137,22 +137,39 @@ implementation details.
 
 ---
 
-## Phase 6 — Context Visualizer
+## Phase 6 — Context Visualizer ✅ complete
 
 Phase 4 already shipped a minimal, per-measure version of most of this
 (`MeasureCellCard`'s filter-context panel, no-filter/current-context
 comparison, and trace visualizer — see `docs/FILTER_CONTEXT.md` "UI").
-What remains is making it a first-class, reusable surface rather than
-embedded editor state:
+Sprint 6 made it a first-class, reusable surface rather than embedded editor
+state:
 
-- a standalone filter-context panel reusable outside a single measure cell
-- row context panel (calculated columns already have one — Sprint 3)
-- richer relationship-propagation trace visualization (diagram, not just
-  a trace-tree node)
-- before/after context comparison as its own component, not embedded in
-  `MeasureCellCard`
+- a standalone filter editor (`ContextFilterEditor`) reusable outside a
+  single measure cell — `MeasureCellCard` and `ContextExplorer` share the
+  one implementation
+- a model-wide `ContextExplorer`, reachable from a `[Model] [Context
+  Explorer]` tab on `ModelCellCard`, with a measure picker
+- a `@xyflow/react` relationship-propagation diagram: table nodes show
+  visible/total rows and a textual DIRECT/PROPAGATED/UNFILTERED/
+  DIRECT+PROPAGATED state; relationship edges show `1 → *` direction and a
+  textual PROPAGATED/ACTIVE·NO EFFECT/INACTIVE state with before/after
+  impact when propagated
+  - a table/relationship inspector (`ContextDetailsPanel`) on selection
+  - a baseline-vs-current comparison (`ContextComparison`) as its own
+    component, driven by two real `evaluateMeasure` calls
+- a plain-English narrative with an Explanation/Step-by-step toggle
+  (`ContextFlowNarrative`), generated from the same runtime data, never
+  hardcoded per-exercise text
+- measure dependency visualization (`MeasureDependencyTree`), reusing the
+  existing `measure-reference` trace nodes
+- the existing technical trace tree remains available as a toggled detail
+  view; row context vs. filter context is called out explicitly
+  (`RowVsFilterContextNote`)
 
-**Exit:** hidden BI mechanics become visually understandable.
+**Exit:** hidden BI mechanics become visually understandable. See
+[`docs/CONTEXT_VISUALIZER.md`](./docs/CONTEXT_VISUALIZER.md) for
+implementation details.
 
 ---
 
