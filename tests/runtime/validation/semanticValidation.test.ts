@@ -171,6 +171,43 @@ describe('semanticValidation', () => {
     expect(allResult.status).toBe('passed')
   })
 
+  it('recognizes SUMX, SELECTEDVALUE and IF for uses-function — new Sprint 9 functions need no validation-engine changes (sprint brief §54)', () => {
+    const { model, datasets, salesTableId } = buildRetailModel()
+    const grossMargin = createMeasure(model, datasets, {
+      homeModelTableId: salesTableId,
+      name: 'Gross Margin X',
+      expression: 'SUMX(Sales, Sales[Revenue] - Sales[Cost])',
+    })
+    expect(grossMargin.diagnostics).toEqual([])
+    const sumxResult = evaluateExpressionSemanticRule(
+      {
+        id: 's', type: 'expression-semantics', title: 'Uses SUMX', points: 5,
+        target: { kind: 'measure', measure: { name: 'Gross Margin X' } },
+        assertions: [{ kind: 'uses-function', functionName: 'SUMX' }],
+      },
+      grossMargin.model,
+      datasets,
+    )
+    expect(sumxResult.status).toBe('passed')
+
+    const revenueStatus = createMeasure(grossMargin.model, datasets, {
+      homeModelTableId: salesTableId,
+      name: 'Revenue Status',
+      expression: 'IF([Gross Margin X] >= 0, "Profitable", "Loss")',
+    })
+    expect(revenueStatus.diagnostics).toEqual([])
+    const ifResult = evaluateExpressionSemanticRule(
+      {
+        id: 's', type: 'expression-semantics', title: 'Uses IF', points: 5,
+        target: { kind: 'measure', measure: { name: 'Revenue Status' } },
+        assertions: [{ kind: 'uses-function', functionName: 'IF' }],
+      },
+      revenueStatus.model,
+      datasets,
+    )
+    expect(ifResult.status).toBe('passed')
+  })
+
   it('passes not-constant-only for a real aggregation', () => {
     const { model, datasets, salesTableId } = buildRetailModel()
     const revenue = createMeasure(model, datasets, { homeModelTableId: salesTableId, name: 'Total Revenue', expression: 'SUM(Sales[Revenue])' })

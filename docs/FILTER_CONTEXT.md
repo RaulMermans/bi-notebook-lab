@@ -1,4 +1,4 @@
-# Filter Context (Sprint 4 + Sprint 8)
+# Filter Context (Sprint 4 + Sprint 8 + Sprint 9)
 
 `FilterContext` is the explicit, first-class runtime concept a measure
 evaluates in — the counterpart to `RowContext` for calculated columns
@@ -10,6 +10,12 @@ primitives without changing them — see [`CALCULATE.md`](./CALCULATE.md) for
 that layer, including the one propagation-pipeline extension
 (`resolveFilterContextUnchecked`'s optional `tableSelections` seed) that made
 `FILTER(Table, predicate)` possible with no change to `propagate()` itself.
+Sprint 9 reuses that exact same extension point twice more, still with no
+change to `propagate()`/`applyDirectFilters()`: a table-expression's row
+subset (`docs/TABLE_EXPRESSIONS.md`) and an iterator's per-row context
+transition (`docs/ITERATORS.md`) both ultimately resolve through
+`resolveFilterContextUnchecked`, exactly like `FILTER`'s CALCULATE modifier
+already did.
 
 ## Representation (`src/runtime/measure/filterContext.ts`)
 

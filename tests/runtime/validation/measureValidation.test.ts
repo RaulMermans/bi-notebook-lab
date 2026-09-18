@@ -82,6 +82,31 @@ describe('measureValidation', () => {
     expect(result.status).toBe('passed')
   })
 
+  it('measure-result rules work unchanged for a SUMX-based measure (sprint brief §54)', () => {
+    const { model, datasets, salesTableId, salesDs, customersDs } = buildRetailModel()
+    const created = createMeasure(model, datasets, {
+      homeModelTableId: salesTableId,
+      name: 'Gross Margin X',
+      expression: 'SUMX(Sales, Sales[Revenue] - Sales[Cost])',
+    })
+    expect(created.diagnostics).toEqual([])
+
+    const spainIds = new Set(customersDs.tables[0].rows.filter((r) => r.Country === 'Spain').map((r) => r.CustomerID))
+    const expected = salesDs.tables[0].rows
+      .filter((r) => spainIds.has(r.CustomerID))
+      .reduce((sum, r) => sum + ((r.Revenue as number) - (r.Cost as number)), 0)
+
+    const result = evaluateMeasureResultRule(
+      {
+        id: 'r', type: 'measure-result', title: 'Gross Margin X', points: 10, measure: { name: 'Gross Margin X' },
+        cases: [{ id: 'spain', title: 'Spain', filters: [{ column: { table: { tableName: 'Customers' }, columnName: 'Country' }, values: ['Spain'] }], expected }],
+      },
+      created.model,
+      datasets,
+    )
+    expect(result.status).toBe('passed')
+  })
+
   it('fails a case once the required relationship is disabled', () => {
     const { model, datasets, salesTableId, productRelationshipId, productsDs, salesDs } = buildRetailModel()
     const withMeasures = addRetailFoundationsSolution(model, datasets, salesTableId)

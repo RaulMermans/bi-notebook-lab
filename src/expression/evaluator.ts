@@ -5,6 +5,7 @@ import type { BinaryOperator } from './ast'
 import type { BoundExpression } from './binder'
 import { buildRelatedIndex, resolveManySideColumn, resolveOneSideTable } from './relatedLookup'
 import type { RowContext } from './rowContext'
+import { compareScalarValues } from './scalarComparison'
 import type { ExecutionTraceNode } from './trace'
 
 export type RowEvaluationErrorCode = 'TYPE_MISMATCH' | 'DIVISION_ERROR'
@@ -181,6 +182,105 @@ function evaluateNode(node: BoundExpression, rowContext: RowContext, ctx: EvalCo
         },
       }
     }
+
+    case 'Comparison': {
+      const left = evaluateNode(node.left, rowContext, ctx, rowIndex)
+      const right = evaluateNode(node.right, rowContext, ctx, rowIndex)
+      const error = left.error ?? right.error
+      const value = error ? null : compareScalarValues(node.operator, left.value, right.value)
+      return {
+        value,
+        error,
+        trace: {
+          kind: 'binary-operation',
+          label: `${formatValue(left.value)} ${node.operator} ${formatValue(right.value)}`,
+          value,
+          children: [left.trace, right.trace],
+        },
+      }
+    }
+
+    case 'Logical': {
+      const left = evaluateNode(node.left, rowContext, ctx, rowIndex)
+      if (!left.error) {
+        if (node.operator === '&&' && left.value === false) {
+          return { value: false, trace: { kind: 'binary-operation', label: `${formatValue(left.value)} && ⋯`, value: false, children: [left.trace] } }
+        }
+        if (node.operator === '||' && left.value === true) {
+          return { value: true, trace: { kind: 'binary-operation', label: `${formatValue(left.value)} || ⋯`, value: true, children: [left.trace] } }
+        }
+      }
+      const right = evaluateNode(node.right, rowContext, ctx, rowIndex)
+      const error = left.error ?? right.error
+      const value = error ? null : node.operator === '&&' ? Boolean(left.value) && Boolean(right.value) : Boolean(left.value) || Boolean(right.value)
+      return {
+        value,
+        error,
+        trace: {
+          kind: 'binary-operation',
+          label: `${formatValue(left.value)} ${node.operator} ${formatValue(right.value)}`,
+          value,
+          children: [left.trace, right.trace],
+        },
+      }
+    }
+
+    case 'If': {
+      const condition = evaluateNode(node.condition, rowContext, ctx, rowIndex)
+      if (condition.error) {
+        return { value: null, error: condition.error, trace: { kind: 'conditional', label: 'IF', value: null, children: [condition.trace] } }
+      }
+      if (typeof condition.value !== 'boolean') {
+        return {
+          value: null,
+          error: { rowIndex, code: 'TYPE_MISMATCH', message: "IF's condition must evaluate to TRUE or FALSE." },
+          trace: { kind: 'conditional', label: 'IF', value: null, children: [condition.trace] },
+        }
+      }
+      if (condition.value) {
+        const branch = evaluateNode(node.whenTrue, rowContext, ctx, rowIndex)
+        return { value: branch.value, error: branch.error, trace: { kind: 'conditional', label: 'IF → true', value: branch.value, children: [condition.trace, branch.trace] } }
+      }
+      if (!node.whenFalse) {
+        return { value: null, trace: { kind: 'conditional', label: 'IF → false (no branch, BLANK)', value: null, children: [condition.trace] } }
+      }
+      const branch = evaluateNode(node.whenFalse, rowContext, ctx, rowIndex)
+      return { value: branch.value, error: branch.error, trace: { kind: 'conditional', label: 'IF → false', value: branch.value, children: [condition.trace, branch.trace] } }
+    }
+
+    case 'Switch': {
+      const switchValue = evaluateNode(node.expression, rowContext, ctx, rowIndex)
+      if (switchValue.error) {
+        return { value: null, error: switchValue.error, trace: { kind: 'conditional', label: 'SWITCH', value: null, children: [switchValue.trace] } }
+      }
+      for (const branchCase of node.cases) {
+        const caseValue = evaluateNode(branchCase.value, rowContext, ctx, rowIndex)
+        if (caseValue.error) {
+          return { value: null, error: caseValue.error, trace: { kind: 'conditional', label: 'SWITCH', value: null, children: [switchValue.trace, caseValue.trace] } }
+        }
+        if (compareScalarValues('=', switchValue.value, caseValue.value)) {
+          const result = evaluateNode(branchCase.result, rowContext, ctx, rowIndex)
+          return {
+            value: result.value,
+            error: result.error,
+            trace: {
+              kind: 'switch-case',
+              label: `SWITCH matched ${formatValue(caseValue.value)}`,
+              value: result.value,
+              children: [switchValue.trace, caseValue.trace, result.trace],
+            },
+          }
+        }
+      }
+      if (node.defaultResult) {
+        const result = evaluateNode(node.defaultResult, rowContext, ctx, rowIndex)
+        return { value: result.value, error: result.error, trace: { kind: 'switch-case', label: 'SWITCH default', value: result.value, children: [switchValue.trace, result.trace] } }
+      }
+      return { value: null, trace: { kind: 'switch-case', label: 'SWITCH (no match, BLANK)', value: null, children: [switchValue.trace] } }
+    }
+
+    case 'Blank':
+      return { value: null, trace: { kind: 'literal', label: 'BLANK', value: null } }
   }
 }
 

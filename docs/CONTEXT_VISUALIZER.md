@@ -1,4 +1,4 @@
-# Context Visualizer (Sprint 6 + Sprint 8)
+# Context Visualizer (Sprint 6 + Sprint 8 + Sprint 9)
 
 This document describes the Context Explorer: a reusable surface that makes
 Sprint 4's filter-context/relationship-propagation mechanics visually
@@ -17,6 +17,18 @@ CALCULATE modification. This required zero changes to `contextAnalysis.ts`,
 exact, bounded scope of this substitution, and the one small
 `graphAdapter.ts` fallback needed so a `FILTER`-derived reduction still shows
 a consistent state badge).
+
+**Sprint 9 compatibility:** an iterator measure (`SUMX(Sales, ...)`) or a
+conditional measure (`IF`/`SWITCH`) evaluates through the same
+`evaluateMeasure` entry point and produces the same `ExecutionTraceNode`
+shape (just with new `iterator`/`table-expression`/`context-transition`/
+`conditional`/`switch-case` trace kinds — see `docs/ITERATORS.md` "Execution
+trace"), so the Explorer's baseline/current comparison and the generic
+`TraceTree` component render them with **zero component changes**, the same
+way Sprint 8 needed none. A measure reference *inside* an iterator's row
+expression gets its own nested `context-transition` trace node per visited
+row (bounded to the first 10 — `docs/ITERATORS.md` "Context transition
+trace"), which the existing trace tree already renders recursively.
 
 ## Purpose
 

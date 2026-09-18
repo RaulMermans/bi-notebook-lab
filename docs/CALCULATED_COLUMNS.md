@@ -71,6 +71,22 @@ summary relevant to calculated columns specifically:
   write `RELATED(Products[Category])` instead. This is the whole point of
   Sprint 3's row-context teaching goal (`docs/LEARNING_MODEL.md` Level 3).
 
+### Conditional and comparison logic (Sprint 9)
+
+Sprint 8 rejected comparison (`=`, `<>`, `>`, `>=`, `<`, `<=`) and logical
+(`&&`, `||`) operators in calculated columns with `UNSUPPORTED_FUNCTION` — a
+deliberate stopgap, not a permanent restriction. Sprint 9 lifts it: a
+calculated column can now use them directly (`Sales[Revenue] > Sales[Cost]`),
+plus `IF(condition, whenTrue, [whenFalse])`, `SWITCH(expression, value1,
+result1, ..., [default])` (including `SWITCH(TRUE(), ...)`) and `BLANK()`.
+None of this needs row-context → filter-context transition — it's pure
+per-row scalar branching, unlike `CALCULATE`, which stays rejected here (see
+`docs/CALCULATE.md` "Context transition boundary"). Scalar comparison
+semantics (blank handling, no cross-type coercion) are shared with measures
+via `compareScalarValues` (`src/expression/scalarComparison.ts`), not
+reimplemented — see `docs/ITERATORS.md` "Conditional logic" for the full
+behavior table (it applies identically here).
+
 ## RELATED
 
 `RELATED(Table[Column])` requires, from the calculated column's own table

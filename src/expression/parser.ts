@@ -194,7 +194,16 @@ class Parser {
     if (token.type === 'identifier') {
       const upper = token.text.toUpperCase()
       if (upper === 'TRUE' || upper === 'FALSE') {
-        // Only treat TRUE/FALSE as boolean literals when not used as a table name (Table[Col] still wins).
+        // Sprint 9: `TRUE()`/`FALSE()` (the canonical `SWITCH(TRUE(), ...)` shape) are a
+        // zero-argument literal call, not a real function — resolved here rather than in
+        // the binder so every binder mode gets the same literal for free.
+        if (this.peek(1).type === '(') {
+          this.advance()
+          this.advance()
+          const close = this.expect(')', '")"')
+          return { kind: 'BooleanLiteral', value: upper === 'TRUE', span: { start: token.span.start, end: close.span.end } }
+        }
+        // Only treat bare TRUE/FALSE as boolean literals when not used as a table name (Table[Col] still wins).
         if (this.peek(1).type !== 'bracket') {
           this.advance()
           return { kind: 'BooleanLiteral', value: upper === 'TRUE', span: token.span }

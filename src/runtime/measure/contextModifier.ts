@@ -2,9 +2,11 @@ import type { Dataset } from '../../domain/data'
 import type { ColumnRef, SemanticModel } from '../../domain/model'
 import { modelTableFor } from '../model/graphAnalysis'
 import { resolveTableRef } from '../model/modelRuntime'
-import { evaluatePredicateForRow, type BoundPredicateNode } from './booleanFilter'
+import { evaluateTableExpression, tableExpressionRowIndexSet } from '../tableExpression/tableExpressionEvaluator'
+import type { BoundFilterTable } from '../tableExpression/tableExpressionTypes'
+import type { BoundPredicateNode } from './booleanFilter'
 import type { ColumnFilter, FilterContext } from './filterContext'
-import { isRowVisible, selectionSize, type ResolvedFilterState } from './filterPropagation'
+import { selectionSize, type ResolvedFilterState } from './filterPropagation'
 
 /**
  * CALCULATE's context-modification layer (sprint brief §4/§48): a set of
@@ -214,11 +216,22 @@ export function applyFilterModifier(
       }
 
       const totalRows = resolved.table.rowCount
-      const matched = new Set<number>()
-      resolved.table.rows.forEach((row, rowIndex) => {
-        if (!isRowVisible(ambientState, modifier.modelTableId, rowIndex)) return
-        if (evaluatePredicateForRow(modifier.predicate, row)) matched.add(rowIndex)
-      })
+      // Reuses the exact same table-expression evaluator FILTER-as-an-iterator-source
+      // relies on (sprint brief §6/§7 "do not maintain two FILTER implementations") —
+      // `ambientState` seeds the FilterTable's BaseTable input's visibility, which is
+      // what makes a FILTER argument automatically intersect with whatever the caller
+      // already had filtered (docs/CALCULATE.md "FILTER and the ambient context").
+      const filterTable: BoundFilterTable = {
+        kind: 'FilterTable',
+        input: { kind: 'BaseTable', modelTableId: modifier.modelTableId, tableName: resolved.table.name, span: { start: 0, end: 0 } },
+        modelTableId: modifier.modelTableId,
+        predicate: modifier.predicate,
+        referencedColumns: modifier.referencedColumns,
+        label: modifier.label,
+        span: { start: 0, end: 0 },
+      }
+      const evaluated = evaluateTableExpression(filterTable, { model, datasets, filterState: ambientState })
+      const matched = tableExpressionRowIndexSet(evaluated) ?? new Set<number>()
       const inputRows = selectionSize(ambientState.rowSelections.get(modifier.modelTableId) ?? 'all', totalRows)
 
       if (modifier.tableWide) {

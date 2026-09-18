@@ -5,8 +5,11 @@ import type { BinaryOperator } from '../../expression/ast'
 import { bindMeasureExpression, type BoundMeasureExpression } from '../../expression/measureBinder'
 import { parseExpression } from '../../expression/parser'
 import type { ExecutionTraceNode } from '../../expression/trace'
+import { collectIteratorCalculatedColumns, evaluateIteratorRowExpression, type IteratorEvalHelpers, type IteratorRowData } from '../iterator/iteratorEvaluator'
+import { buildRelatedIndex, resolveOneSideTable } from '../../expression/relatedLookup'
+import { evaluateTableExpression, tableExpressionRowCount } from '../tableExpression/tableExpressionEvaluator'
 import { compareScalarValues } from './booleanFilter'
-import { computeAggregation, computeCountRows } from './aggregation'
+import { computeAggregation, computeCountRows, computeIteratorAggregation } from './aggregation'
 import {
   applyFilterModifier,
   buildEffectiveContext,
@@ -14,6 +17,7 @@ import {
   toFilterContext,
   toTableSelectionIndexes,
   type EffectiveContext,
+  type FilterModifier,
 } from './contextModifier'
 import { EMPTY_FILTER_CONTEXT, type FilterContext } from './filterContext'
 import {
@@ -25,6 +29,10 @@ import {
 } from './filterPropagation'
 import { getLogicalColumnValues, type LogicalColumnRef } from './logicalColumn'
 import { resolveTableRef } from '../model/modelRuntime'
+
+/** Bounded trace sampling — sprint brief §27/§44: runtime still evaluates every required row/measure-reference, but only a leading sample is kept in the trace tree. */
+const ITERATOR_PREVIEW_LIMIT = 10
+const CONTEXT_TRANSITION_TRACE_LIMIT = 10
 
 export interface MeasureExecution {
   measureId: string
@@ -220,10 +228,13 @@ function evaluateNode(node: BoundMeasureExpression, ctx: MeasureEvalContext): No
     }
 
     case 'CountRows': {
-      const totalRows = resolveTableRowCount(ctx, node.modelTableId)
-      const visibleCount = selectionSize(ctx.filterState.rowSelections.get(node.modelTableId) ?? 'all', totalRows)
-      const result = computeCountRows(node.label, visibleCount, totalRows)
-      return { value: result.value, diagnostics: [], trace: result.trace }
+      // Sprint 9 generalization (sprint brief §14): shares the table-expression
+      // evaluator with CALCULATE's FILTER modifier and the iterator functions,
+      // rather than a second row-counting implementation.
+      const evaluated = evaluateTableExpression(node.table, { model: ctx.model, datasets: ctx.datasets, filterState: ctx.filterState })
+      const totalRows = tableExpressionRowCount(node.table, ctx.model, ctx.datasets)
+      const result = computeCountRows(node.label, evaluated.rows.length, totalRows)
+      return { value: result.value, diagnostics: [], trace: { ...result.trace, children: [evaluated.trace] } }
     }
 
     case 'Comparison': {
@@ -276,6 +287,85 @@ function evaluateNode(node: BoundMeasureExpression, ctx: MeasureEvalContext): No
 
     case 'Calculate':
       return evaluateCalculate(node, ctx)
+
+    case 'Blank':
+      return { value: null, diagnostics: [], trace: { kind: 'literal', label: 'BLANK', value: null } }
+
+    case 'If': {
+      const condition = evaluateNode(node.condition, ctx)
+      if (condition.diagnostics.length > 0) {
+        return { value: null, diagnostics: condition.diagnostics, trace: { kind: 'conditional', label: 'IF', value: null, children: [condition.trace] } }
+      }
+      if (typeof condition.value !== 'boolean') {
+        return {
+          value: null,
+          diagnostics: [diagnostic('error', 'IF_CONDITION_NOT_BOOLEAN', "IF's condition must evaluate to TRUE or FALSE.")],
+          trace: { kind: 'conditional', label: 'IF', value: null, children: [condition.trace] },
+        }
+      }
+      if (condition.value) {
+        const branch = evaluateNode(node.whenTrue, ctx)
+        return {
+          value: branch.value,
+          diagnostics: branch.diagnostics,
+          effectiveFilterState: branch.effectiveFilterState,
+          trace: { kind: 'conditional', label: 'IF → true', value: branch.value, children: [condition.trace, branch.trace] },
+        }
+      }
+      if (!node.whenFalse) {
+        return { value: null, diagnostics: [], trace: { kind: 'conditional', label: 'IF → false (no branch, BLANK)', value: null, children: [condition.trace] } }
+      }
+      const branch = evaluateNode(node.whenFalse, ctx)
+      return {
+        value: branch.value,
+        diagnostics: branch.diagnostics,
+        effectiveFilterState: branch.effectiveFilterState,
+        trace: { kind: 'conditional', label: 'IF → false', value: branch.value, children: [condition.trace, branch.trace] },
+      }
+    }
+
+    case 'Switch': {
+      const switchValue = evaluateNode(node.expression, ctx)
+      if (switchValue.diagnostics.length > 0) {
+        return { value: null, diagnostics: switchValue.diagnostics, trace: { kind: 'conditional', label: 'SWITCH', value: null, children: [switchValue.trace] } }
+      }
+      for (const branchCase of node.cases) {
+        const caseValue = evaluateNode(branchCase.value, ctx)
+        if (caseValue.diagnostics.length > 0) {
+          return { value: null, diagnostics: caseValue.diagnostics, trace: { kind: 'conditional', label: 'SWITCH', value: null, children: [switchValue.trace, caseValue.trace] } }
+        }
+        if (compareScalarValues('=', switchValue.value, caseValue.value)) {
+          const result = evaluateNode(branchCase.result, ctx)
+          return {
+            value: result.value,
+            diagnostics: result.diagnostics,
+            effectiveFilterState: result.effectiveFilterState,
+            trace: {
+              kind: 'switch-case',
+              label: `SWITCH matched ${formatValue(caseValue.value)}`,
+              value: result.value,
+              children: [switchValue.trace, caseValue.trace, result.trace],
+            },
+          }
+        }
+      }
+      if (node.defaultResult) {
+        const result = evaluateNode(node.defaultResult, ctx)
+        return {
+          value: result.value,
+          diagnostics: result.diagnostics,
+          effectiveFilterState: result.effectiveFilterState,
+          trace: { kind: 'switch-case', label: 'SWITCH default', value: result.value, children: [switchValue.trace, result.trace] },
+        }
+      }
+      return { value: null, diagnostics: [], trace: { kind: 'switch-case', label: 'SWITCH (no match, BLANK)', value: null, children: [switchValue.trace] } }
+    }
+
+    case 'SelectedValue':
+      return evaluateSelectedValue(node, ctx)
+
+    case 'Iterator':
+      return evaluateIteratorCall(node, ctx)
 
     case 'Divide': {
       const numerator = evaluateNode(node.numerator, ctx)
@@ -384,6 +474,206 @@ function buildModifierTraceNode(outcome: ReturnType<typeof applyFilterModifier>)
     return { kind: 'boolean-filter', label: outcome.label }
   }
   return { kind: 'remove-filters', label: outcome.label, metadata: { removed: outcome.removedLabels ?? [] } }
+}
+
+/**
+ * Evaluates `SELECTEDVALUE(Table[Column], [alternate])` (sprint brief §37-§39):
+ * exactly one distinct visible value under the current FilterContext returns
+ * that value; zero or more than one returns the alternate (or BLANK). Shares
+ * the same "distinct visible values" notion `VALUES(Column)` computes
+ * (`tableExpressionEvaluator.ts`'s `ValuesTable` case), rather than a second
+ * value-resolution mechanism.
+ */
+function evaluateSelectedValue(node: Extract<BoundMeasureExpression, { kind: 'SelectedValue' }>, ctx: MeasureEvalContext): NodeResult {
+  const modelTable = ctx.model.tables.find((t) => t.id === node.modelTableId)
+  const resolved = modelTable ? resolveTableRef(ctx.datasets, modelTable) : undefined
+  const totalRows = resolved?.table.rowCount ?? 0
+  const visible = visibleRowIndices(ctx.filterState, node.modelTableId, totalRows)
+
+  const seen = new Set<unknown>()
+  const distinctValues: unknown[] = []
+  if (resolved) {
+    for (const rowIndex of visible) {
+      const value = resolved.table.rows[rowIndex][node.columnName] ?? null
+      if (!seen.has(value)) {
+        seen.add(value)
+        distinctValues.push(value)
+      }
+    }
+  }
+
+  const label = `SELECTEDVALUE(${node.tableName}[${node.columnName}])`
+  if (distinctValues.length === 1) {
+    return { value: distinctValues[0], diagnostics: [], trace: { kind: 'aggregation', label, value: distinctValues[0], metadata: { distinctVisibleValues: 1 } } }
+  }
+
+  if (node.alternate) {
+    const alternate = evaluateNode(node.alternate, ctx)
+    return {
+      value: alternate.value,
+      diagnostics: alternate.diagnostics,
+      trace: { kind: 'aggregation', label, value: alternate.value, metadata: { distinctVisibleValues: distinctValues.length }, children: [alternate.trace] },
+    }
+  }
+
+  return { value: null, diagnostics: [], trace: { kind: 'aggregation', label, value: null, metadata: { distinctVisibleValues: distinctValues.length } } }
+}
+
+/**
+ * Evaluates `SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX` (sprint brief §15-§21).
+ * Resolves the table-expression argument once (respecting the *current*
+ * FilterContext, sprint brief §5), prefetches every calculated column the row
+ * expression reads exactly once (sprint brief §69), then evaluates the bound
+ * row expression once per visible row via `iteratorEvaluator.ts`'s pure,
+ * model-free per-row evaluator — model-dependent lookups (RELATED indexes,
+ * calculated-column vectors, measure-reference context transition) are
+ * injected as `IteratorEvalHelpers` closures built once here.
+ */
+function evaluateIteratorCall(node: Extract<BoundMeasureExpression, { kind: 'Iterator' }>, ctx: MeasureEvalContext): NodeResult {
+  const evaluatedTable = evaluateTableExpression(node.table, { model: ctx.model, datasets: ctx.datasets, filterState: ctx.filterState })
+
+  const calcRefs: LogicalColumnRef[] = []
+  collectIteratorCalculatedColumns(node.rowExpression, calcRefs)
+  const calcVectors = new Map<string, unknown[]>()
+  for (const ref of calcRefs) {
+    if (!calcVectors.has(ref.columnId)) calcVectors.set(ref.columnId, getColumnValues(ctx, ref))
+  }
+
+  const relatedIndexCache = new Map<string, Map<unknown, Record<string, unknown>> | undefined>()
+  const getRelatedIndex = (relationshipId: string): Map<unknown, Record<string, unknown>> | undefined => {
+    if (relatedIndexCache.has(relationshipId)) return relatedIndexCache.get(relationshipId)
+    const relationship = ctx.model.relationships.find((r) => r.id === relationshipId)
+    const oneSide = relationship ? resolveOneSideTable(ctx.datasets, relationship) : undefined
+    const index = oneSide ? buildRelatedIndex(oneSide.table, oneSide.column) : undefined
+    relatedIndexCache.set(relationshipId, index)
+    return index
+  }
+
+  const contextTransitionTraces: ExecutionTraceNode[] = []
+  const helpers: IteratorEvalHelpers = {
+    getCalculatedVector: (columnId) => calcVectors.get(columnId) ?? [],
+    getRelatedIndex,
+    evaluateMeasureReference: (measureId, measureName, rowData) =>
+      evaluateIteratorMeasureReference(node, measureId, measureName, rowData, ctx, contextTransitionTraces),
+  }
+
+  const values: unknown[] = []
+  const previewRows: ExecutionTraceNode[] = []
+  let errorDiagnostics: ExpressionDiagnostic[] | undefined
+
+  for (const row of evaluatedTable.rows) {
+    const rowData: IteratorRowData =
+      row.kind === 'model-row' ? { kind: 'model', row: row.row, rowIndex: row.rowIndex } : { kind: 'value', value: row.value }
+    const result = evaluateIteratorRowExpression(node.rowExpression, rowData, helpers)
+    if (result.diagnostics.length > 0) {
+      errorDiagnostics = result.diagnostics
+      break
+    }
+    values.push(result.value)
+    if (previewRows.length < ITERATOR_PREVIEW_LIMIT) {
+      const rowLabel = row.kind === 'model-row' ? `Row ${row.rowIndex}` : `Value ${formatValue(row.value)}`
+      previewRows.push({ kind: 'result', label: rowLabel, value: result.value, children: [result.trace] })
+    }
+  }
+
+  if (errorDiagnostics) {
+    return {
+      value: null,
+      diagnostics: errorDiagnostics,
+      trace: { kind: 'iterator', label: node.label, value: null, metadata: { error: true, visibleRows: evaluatedTable.rows.length }, children: [evaluatedTable.trace] },
+    }
+  }
+
+  const aggregated = computeIteratorAggregation(node.function, node.label, values, evaluatedTable.rows.length)
+  return {
+    value: aggregated.value,
+    diagnostics: aggregated.diagnostics,
+    trace: {
+      kind: 'iterator',
+      label: node.label,
+      value: aggregated.value,
+      metadata: { visibleRows: evaluatedTable.rows.length, evaluated: values.length },
+      children: [evaluatedTable.trace, ...previewRows, ...contextTransitionTraces],
+    },
+  }
+}
+
+/**
+ * The bounded, documented context transition (sprint brief §40-§43): a
+ * measure reference inside an iterator's row expression evaluates under a
+ * filter context where the current row's lineage becomes a filter, layered
+ * on top of (never replacing) the enclosing FilterContext. A **fresh**
+ * `cache` (but shared `visiting`/`columnValuesCache`) guarantees a measure
+ * evaluated for one row can never leak into another row's result (sprint
+ * brief §43 "no row-to-row leakage") — the same pattern `evaluateCalculate`
+ * already uses for CALCULATE's own nested scope.
+ *
+ * Sprint 9 boundary (sprint brief §42): this covers the iterator row's own
+ * physical table/column lineage only — it is not full expanded-table DAX
+ * context transition. See docs/ITERATORS.md "Context transition".
+ */
+function evaluateIteratorMeasureReference(
+  node: Extract<BoundMeasureExpression, { kind: 'Iterator' }>,
+  measureId: string,
+  measureName: string,
+  rowData: IteratorRowData,
+  ctx: MeasureEvalContext,
+  traceSink: ExecutionTraceNode[],
+): { value: unknown; diagnostics: ExpressionDiagnostic[]; trace: ExecutionTraceNode } {
+  const modifiers: FilterModifier[] = []
+  const appliedLabels: string[] = []
+  const modelTable = ctx.model.tables.find((t) => t.id === node.table.modelTableId)
+  const resolved = modelTable ? resolveTableRef(ctx.datasets, modelTable) : undefined
+
+  if (node.rowKind === 'model' && rowData.kind === 'model' && rowData.row && resolved) {
+    for (const column of resolved.table.columns) {
+      const value = rowData.row[column.name] ?? null
+      const label = `${resolved.table.name}[${column.name}] = ${formatValue(value)}`
+      modifiers.push({
+        kind: 'ReplaceColumnFilter',
+        column: { datasetId: resolved.dataset.id, tableId: resolved.table.id, columnId: column.id },
+        operator: 'equals',
+        values: [value],
+        label,
+      })
+      appliedLabels.push(label)
+    }
+  } else if (node.rowKind === 'value' && node.sourceColumn && rowData.kind === 'value' && resolved) {
+    const columnName = resolved.table.columns.find((c) => c.id === node.sourceColumn!.columnId)?.name ?? ''
+    const value = rowData.value ?? null
+    const label = `${resolved.table.name}[${columnName}] = ${formatValue(value)}`
+    modifiers.push({ kind: 'ReplaceColumnFilter', column: node.sourceColumn, operator: 'equals', values: [value], label })
+    appliedLabels.push(label)
+  }
+
+  const nextEffectiveContext = cloneEffectiveContext(ctx.effectiveContext)
+  for (const modifier of modifiers) applyFilterModifier(ctx.model, ctx.datasets, nextEffectiveContext, modifier, ctx.filterState)
+
+  const innerFilterContext = toFilterContext(nextEffectiveContext)
+  const innerTableSelections = toTableSelectionIndexes(nextEffectiveContext)
+  const innerFilterState = resolveFilterContextUnchecked(ctx.model, ctx.datasets, innerFilterContext, innerTableSelections)
+
+  const nestedCtx: MeasureEvalContext = {
+    model: ctx.model,
+    datasets: ctx.datasets,
+    filterState: innerFilterState,
+    effectiveContext: nextEffectiveContext,
+    cache: new Map(),
+    visiting: ctx.visiting,
+    columnValuesCache: ctx.columnValuesCache,
+  }
+
+  const result = evaluateMeasureById(measureId, nestedCtx)
+  const trace: ExecutionTraceNode = {
+    kind: 'context-transition',
+    label: `[${measureName}]`,
+    value: result.value,
+    metadata: { appliedFilters: appliedLabels },
+    children: [result.trace],
+  }
+  if (traceSink.length < CONTEXT_TRANSITION_TRACE_LIMIT) traceSink.push(trace)
+
+  return { value: result.value, diagnostics: result.diagnostics, trace }
 }
 
 function inferMeasureDataType(value: unknown): DataType | 'unknown' {

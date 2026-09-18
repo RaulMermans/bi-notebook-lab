@@ -252,6 +252,53 @@ architecture, and known DAX compatibility limitations.
 
 ---
 
+## Phase 8.5 — Advanced DAX: Iterators, Table Expressions & Conditional Logic ✅ complete
+
+> Referred to as "Sprint 9" in its own implementation brief — a separate
+> numbering from this roadmap's Phases (Phase 9 below is "Learning System,"
+> not this work). Both numbers point at the same shipped feature set.
+
+- a canonical `BoundTableExpression` abstraction (`runtime/tableExpression/`)
+  that a bare model table, `FILTER`, `VALUES` and `DISTINCT` all bind to, and
+  one evaluator every consumer shares
+- `FILTER` became a reusable table-expression primitive: CALCULATE's own
+  `FILTER` modifier now evaluates through the same code path a standalone
+  `SUMX(FILTER(...), ...)` uses — refactored, not duplicated, with every
+  Sprint 8 CALCULATE/FILTER test still passing
+- `VALUES(Column)`/`DISTINCT(Column)` as one-column table expressions,
+  respecting the current FilterContext, with real blanks retained and no
+  synthesized unknown-member row (a documented compatibility boundary)
+- `COUNTROWS` generalized to accept any table expression, not just a bare
+  table
+- `SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX` — real row-iterating DAX, with a
+  genuine per-row Row Context (physical + calculated columns, `RELATED`),
+  parsed/bound once and evaluated in O(n)
+- the implicit context transition a measure reference needs inside an
+  iterator's row (`SUMX(Products, [Total Revenue])`,
+  `SUMX(VALUES(Products[Category]), [Total Revenue])`), with context-safe
+  caching proven by a dedicated cache-leakage regression
+- `IF`/`SWITCH`/`BLANK()`/`TRUE()`/`FALSE()` in measures **and** calculated
+  columns; calculated columns also gained the comparison/logical operators
+  Sprint 8 deliberately deferred
+- `SELECTEDVALUE`, sharing its distinct-visible-values notion with `VALUES`
+- zero visual-specific or validation-specific new-function code: every
+  `KPI`/`Table`/`Bar`/`Line`/`Slicer` and the semantic/measure-result
+  validation rules picked up every new function automatically through the
+  unmodified `evaluateMeasure`
+- verified end-to-end against the built-in Retail sample (`Gross Margin X`,
+  `Calculated Revenue` via `RELATED`, `High Quantity Revenue` via
+  `FILTER`+`SUMX`, `Average Margin per Sale`, `Selected Country`, `Revenue
+  Band`/`Profitable` calculated columns)
+
+**Exit:** the engine moved from "aggregations + filter manipulation" to "row
+context + filter context + table expressions + iterators + context
+transition + conditional logic" — a substantial step toward realistic Power
+BI Desktop practice. See [`docs/ITERATORS.md`](./docs/ITERATORS.md) and
+[`docs/TABLE_EXPRESSIONS.md`](./docs/TABLE_EXPRESSIONS.md) for implementation
+details, architecture, and known DAX compatibility limitations.
+
+---
+
 ## Phase 9 — Learning System
 
 - lesson catalog
@@ -280,10 +327,12 @@ architecture, and known DAX compatibility limitations.
 
 ## Later, only if validated
 
-- advanced DAX — iterators (`SUMX`/`AVERAGEX`/…), `VALUES`/`DISTINCT`/
-  `SELECTEDVALUE`, `IF`/`SWITCH`, richer table expressions (recommended
-  Sprint 9 — see [`docs/CALCULATE.md`](./docs/CALCULATE.md) "Known DAX
-  compatibility limitations")
+- time intelligence & date modeling — proper Date Table semantics,
+  `SAMEPERIODLASTYEAR`/`DATEADD`/`PREVIOUSMONTH`/`PREVIOUSYEAR`,
+  `DATESYTD`/`TOTALYTD`, YoY/YoY%/YTD/MoM, date-table validation
+  (recommended next, now that Phase 8.5's iterator/table-expression
+  foundation exists — see [`docs/ITERATORS.md`](./docs/ITERATORS.md) "Known
+  DAX compatibility limitations")
 - custom datasets
 - shareable notebooks
 - desktop wrapper

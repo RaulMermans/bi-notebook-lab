@@ -320,23 +320,47 @@ replacing the other. No nesting depth limit is enforced explicitly (the same
 ## Context transition boundary
 
 Sprint 8 supports `CALCULATE` **in measure context only**. Using `CALCULATE`
-(or `FILTER`/`REMOVEFILTERS`/`ALL`) inside a **calculated column** expression
-is rejected at bind time with a dedicated `CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED`
-diagnostic (`src/expression/binder.ts`) rather than either (a) silently doing
-nothing sensible, or (b) implementing real DAX's row-context → filter-context
-transition, which is out of scope for this sprint. This is a deliberate,
-documented limitation, not an oversight — see sprint brief §34's "prefer a
-structured diagnostic unless the transition can be made rigorous."
+inside a **calculated column** expression is still rejected at bind time with
+a dedicated `CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED` diagnostic
+(`src/expression/binder.ts`) rather than either (a) silently doing nothing
+sensible, or (b) implementing real DAX's row-context → filter-context
+transition, which remains out of scope. This is a deliberate, documented
+limitation, not an oversight — see sprint brief §34's "prefer a structured
+diagnostic unless the transition can be made rigorous." Sprint 9 *does* add a
+different, narrower row-context → filter-context transition — for a measure
+referenced inside an iterator's row expression (`SUMX(Products, [Total
+Revenue])`) — see [`docs/ITERATORS.md`](./ITERATORS.md) "Implicit context
+transition." That mechanism is iterator-specific and does not lift this
+calculated-column restriction.
 
 ## `ALL` scope limitation
 
 Sprint 8 supports `ALL` **only** as a `CALCULATE` filter modifier
-(`ALL(Table)` / `ALL(Table[Column])`, both ≈ "remove filters"). It does not
-yet implement `ALL` as a general table-returning expression usable outside
-`CALCULATE` (e.g. as a `SUMX` iterator source) — that's future,
-iterator-sprint scope, and using `ALL(...)` anywhere else falls back to the
+(`ALL(Table)` / `ALL(Table[Column])`, both ≈ "remove filters"). Sprint 9 does
+**not** extend `ALL` into a general table-returning expression usable outside
+`CALCULATE` (e.g. as a `SUMX` iterator source) — `FILTER`/`VALUES`/`DISTINCT`
+became reusable table expressions (see
+[`docs/TABLE_EXPRESSIONS.md`](./TABLE_EXPRESSIONS.md)), but `ALL` still only
+works as a CALCULATE filter modifier; using it anywhere else falls back to the
 "only supported as a CALCULATE filter argument" `UNSUPPORTED_FUNCTION`
-diagnostic.
+diagnostic. A future sprint could fold `ALL` into the same
+`BoundTableExpression` abstraction (it's structurally "remove the FILTER
+applied to a table"), but Sprint 9 didn't need it to satisfy the iterator
+foundation and deliberately left it alone.
+
+## Sprint 9: FILTER became a shared table-expression primitive
+
+CALCULATE's `FILTER(Table, predicate)` filter modifier (`bindFilterFunction` in
+`src/expression/measureBinder.ts`) now binds through the same
+`bindTableExpression` (`src/runtime/tableExpression/tableExpressionBinder.ts`)
+that `COUNTROWS`/`SUMX`/etc. use, and `applyFilterModifier`'s `PredicateFilter`
+case (`src/runtime/measure/contextModifier.ts`) evaluates the matched rows
+through the same `evaluateTableExpression`
+(`src/runtime/tableExpression/tableExpressionEvaluator.ts`) that a standalone
+`SUMX(FILTER(...), ...)` uses. This is a refactor into a reusable
+abstraction, not a semantic rewrite — every example on this page and every
+Sprint 8 test still passes unchanged. See
+[`docs/TABLE_EXPRESSIONS.md`](./TABLE_EXPRESSIONS.md) for the full design.
 
 ## Execution trace (`src/expression/trace.ts`)
 
@@ -479,7 +503,13 @@ everything or nothing.
   `true`) — a deliberate simplification per sprint brief §52, not a bug.
 - **Context Explorer's diagram substitution is top-level-only** — see
   "Context Explorer integration" above.
-- **`SUMX`/`AVERAGEX`/other iterators, `VALUES`/`DISTINCT`/`SELECTEDVALUE`,
-  `IF`/`SWITCH`, calculated tables, time intelligence, many-to-many and
-  bidirectional relationships remain out of scope** — Sprint 9+ territory,
-  not started here.
+- **`SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX`, `VALUES`/`DISTINCT`,
+  `SELECTEDVALUE`, `IF`/`SWITCH`/`BLANK` are now implemented** — see
+  [`docs/ITERATORS.md`](./ITERATORS.md) and
+  [`docs/TABLE_EXPRESSIONS.md`](./TABLE_EXPRESSIONS.md) (Sprint 9).
+- **Calculated tables, time intelligence, many-to-many and bidirectional
+  relationships, `ALLSELECTED`/`ALLEXCEPT`/`CALCULATETABLE`/
+  `USERELATIONSHIP`/`CROSSFILTER`, `EARLIER`/`EARLIEST` and nested iterator
+  row-context stacks remain out of scope** — Sprint 10+ territory, not started
+  here (see [`docs/ITERATORS.md`](./ITERATORS.md) "Known limitations" for the
+  iterator-specific boundaries, e.g. `SUMX(table, CALCULATE(...))`).

@@ -186,7 +186,10 @@ describe('CALCULATE binder diagnostics', () => {
   it('rejects FILTER with a non-table first argument', () => {
     const { model, datasets } = baseModel()
     const result = bindMeasure(model, datasets, 'CALCULATE([Total Revenue], FILTER(Customers[Country], Customers[Country] = "Spain"))')
-    expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'INVALID_FUNCTION_ARGUMENT' })])
+    // Sprint 9 routes FILTER through the shared table-expression binder (sprint brief §6-§7), which
+    // reports a malformed table argument as INVALID_TABLE_EXPRESSION_ARGUMENT instead of the generic
+    // INVALID_FUNCTION_ARGUMENT — still a single, still-rejected error, just a more specific code.
+    expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'INVALID_TABLE_EXPRESSION_ARGUMENT' })])
   })
 
   it('binds FILTER as a table-wide PredicateFilter modifier', () => {

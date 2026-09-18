@@ -44,10 +44,12 @@ The first product milestone is not a dashboard builder. It is a **learning runti
 Sprint 1 (Data Runtime), Sprint 2 (Semantic Model Runtime), Sprint 3
 (Calculated Columns & Row Context), Sprint 4 (Measures & Filter Context),
 Sprint 5 (Validation Engine), Sprint 6 (Context Visualizer), Sprint 7
-(Visual Cells) and Sprint 8 (`CALCULATE` & Filter Context Modification) are
-complete — the full MVP learning loop (import → model → calculated columns →
-measures → filter context manipulation → visualize → validate) now works end
-to end. This repository now contains:
+(Visual Cells), Sprint 8 (`CALCULATE` & Filter Context Modification) and
+Sprint 9 (Iterators, Table Expressions & Conditional Logic) are complete —
+the full MVP learning loop (import → model → calculated columns → measures →
+filter context manipulation → visualize → validate) now works end to end,
+with real row-iterating DAX (`SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX`) and
+conditional logic (`IF`/`SWITCH`) on top. This repository now contains:
 
 - product and architecture contracts
 - notebook/cell domain types as a discriminated union, including functional
@@ -114,13 +116,23 @@ to end. This repository now contains:
   the execution trace and Context Explorer both surface the internal
   modification explicitly, and every existing visual/validation surface
   picked it up automatically through the unmodified `evaluateMeasure`.
+- **Iterators & table expressions** — `SUMX`/`AVERAGEX`/`MINX`/`MAXX`/
+  `COUNTX` evaluate a real expression once per row of a table expression
+  (a model table, `FILTER(...)`, `VALUES(...)`, or `DISTINCT(...)`), all
+  sharing one canonical `BoundTableExpression`/evaluator with `CALCULATE`'s
+  own `FILTER` modifier and the now-generalized `COUNTROWS`. A measure
+  reference inside an iterator's row (`SUMX(Products, [Total Revenue])`)
+  gets a bounded, context-safe filter-context transition per row.
+- **Conditional logic** — `IF`, `SWITCH` (including `SWITCH(TRUE(), ...)`),
+  `BLANK()` and `SELECTEDVALUE` work in measures; calculated columns gained
+  the comparison/logical/`IF`/`SWITCH` support Sprint 8 deliberately
+  deferred (`Order Size = IF(Sales[Revenue] >= 1000, "Large", "Standard")`).
 
-Bidirectional/many-to-many relationships, time intelligence, iterators
-(`SUMX`/`AVERAGEX`/etc.), `IF`/`SWITCH`, and full DAX table expressions are
-**not** implemented yet — see [`docs/CALCULATE.md`](./docs/CALCULATE.md),
-[`docs/MEASURES.md`](./docs/MEASURES.md) and
-[`docs/FILTER_CONTEXT.md`](./docs/FILTER_CONTEXT.md) for the exact scope and
-known limitations.
+Bidirectional/many-to-many relationships and time intelligence are **not**
+implemented yet — see [`docs/ITERATORS.md`](./docs/ITERATORS.md),
+[`docs/TABLE_EXPRESSIONS.md`](./docs/TABLE_EXPRESSIONS.md) and
+[`docs/CALCULATE.md`](./docs/CALCULATE.md) for the exact scope and known
+limitations.
 
 ## Run locally
 
@@ -165,6 +177,16 @@ CALCULATE([Total Revenue], REMOVEFILTERS(Customers[Country]))` to see a
 slicer-proof grand total, and open either measure in the Context Explorer to
 see the internal CALCULATE modification laid out step by step.
 
+Create `Gross Margin X = SUMX(Sales, Sales[Revenue] - Sales[Cost])` and
+compare it to `Total Revenue - Total Cost`; create `Calculated Revenue =
+SUMX(Sales, Sales[Quantity] * RELATED(Products[UnitPrice]))` and compare it
+to `SUM(Sales[Revenue])`; create `Selected Country = SELECTEDVALUE(
+Customers[Country], "Multiple Countries")`, put it on a KPI, and watch it
+switch between `"Multiple Countries"` and a single country name as you change
+the `Customers[Country]` Slicer. Add a calculated column `Revenue Band =
+SWITCH(TRUE(), Sales[Revenue] >= 2000, "Large", Sales[Revenue] >= 500,
+"Medium", "Small")` and preview it row by row.
+
 ## Core documents
 
 - [`PRODUCT.md`](./PRODUCT.md)
@@ -182,6 +204,8 @@ see the internal CALCULATE modification laid out step by step.
 - [`docs/CONTEXT_VISUALIZER.md`](./docs/CONTEXT_VISUALIZER.md)
 - [`docs/VISUAL_CELLS.md`](./docs/VISUAL_CELLS.md)
 - [`docs/CALCULATE.md`](./docs/CALCULATE.md)
+- [`docs/TABLE_EXPRESSIONS.md`](./docs/TABLE_EXPRESSIONS.md)
+- [`docs/ITERATORS.md`](./docs/ITERATORS.md)
 
 ## Scope guardrail
 

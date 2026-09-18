@@ -3,6 +3,10 @@ import type { ColumnRef, SemanticModel } from '../domain/model'
 import { bindPredicateExpression, dedupeColumnRefs, describeBoundPredicate, type BoundPredicateNode } from '../runtime/measure/booleanFilter'
 import type { FilterModifier } from '../runtime/measure/contextModifier'
 import { resolveLogicalColumn, type LogicalColumnRef } from '../runtime/measure/logicalColumn'
+import { bindTableExpression } from '../runtime/tableExpression/tableExpressionBinder'
+import type { BoundTableExpression } from '../runtime/tableExpression/tableExpressionTypes'
+import { bindIteratorCall, isIteratorFunctionName } from '../runtime/iterator/iteratorBinder'
+import type { BoundIteratorCall } from '../runtime/iterator/iteratorTypes'
 import { resolveTableRef } from '../runtime/model/modelRuntime'
 import type { BinaryOperator, ComparisonOperator, Expression, FunctionCallNode, LogicalOperator, SourceSpan, UnaryOperator } from './ast'
 import { findModelTableByName } from './binder'
@@ -58,7 +62,8 @@ export interface BoundAggregation {
 
 export interface BoundCountRows {
   kind: 'CountRows'
-  modelTableId: string
+  /** Sprint 9 generalizes COUNTROWS from a bare model table to any `BoundTableExpression` (sprint brief §14) — `COUNTROWS(Sales)` still binds to a plain `BaseTable`, so existing behavior is unchanged. */
+  table: BoundTableExpression
   label: string
   span: SourceSpan
 }
@@ -101,6 +106,50 @@ export interface BoundCalculate {
   span: SourceSpan
 }
 
+/**
+ * Sprint 9 additions (sprint brief §29-§38): `IF`/`SWITCH`/`BLANK` close the
+ * conditional-logic gap, `SELECTEDVALUE` reads the current FilterContext's
+ * distinct-visible-values, and `Iterator` is `SUMX`/`AVERAGEX`/`MINX`/
+ * `MAXX`/`COUNTX` (bound in `runtime/iterator/iteratorBinder.ts` — reused
+ * here rather than duplicated, sprint brief §16 "measureEvaluator may
+ * dispatch to the iterator runtime").
+ */
+export interface BoundMeasureIf {
+  kind: 'If'
+  condition: BoundMeasureExpression
+  whenTrue: BoundMeasureExpression
+  whenFalse?: BoundMeasureExpression
+  span: SourceSpan
+}
+
+export interface BoundMeasureSwitchCase {
+  value: BoundMeasureExpression
+  result: BoundMeasureExpression
+}
+
+export interface BoundMeasureSwitch {
+  kind: 'Switch'
+  expression: BoundMeasureExpression
+  cases: BoundMeasureSwitchCase[]
+  defaultResult?: BoundMeasureExpression
+  span: SourceSpan
+}
+
+export interface BoundMeasureBlank {
+  kind: 'Blank'
+  span: SourceSpan
+}
+
+export interface BoundSelectedValue {
+  kind: 'SelectedValue'
+  column: ColumnRef
+  modelTableId: string
+  columnName: string
+  tableName: string
+  alternate?: BoundMeasureExpression
+  span: SourceSpan
+}
+
 export type BoundMeasureExpression =
   | BoundMeasureLiteral
   | BoundMeasureUnary
@@ -112,6 +161,11 @@ export type BoundMeasureExpression =
   | BoundMeasureComparison
   | BoundMeasureLogical
   | BoundCalculate
+  | BoundMeasureIf
+  | BoundMeasureSwitch
+  | BoundMeasureBlank
+  | BoundSelectedValue
+  | BoundIteratorCall
 
 export interface MeasureBindContext {
   model: SemanticModel
@@ -236,35 +290,22 @@ function bindAggregationCall(name: string, fn: AggregationFunction, node: Functi
   }
 }
 
+/** Sprint 9 generalizes COUNTROWS to accept any `BoundTableExpression` (sprint brief §14): `COUNTROWS(Sales)`, `COUNTROWS(FILTER(Sales, ...))`, `COUNTROWS(VALUES(Customers[Country]))`. */
 function bindCountRows(node: FunctionCallNode, ctx: MeasureBindContext): MeasureBindResult {
-  const [arg] = node.args
-  if (node.args.length !== 1 || arg.kind !== 'TableReference') {
+  if (node.args.length !== 1) {
     return {
       diagnostics: [
-        diagnostic(
-          'error',
-          'INVALID_AGGREGATION_ARGUMENT',
-          'COUNTROWS expects exactly one table argument, e.g. COUNTROWS(Sales).',
-          node.span,
-        ),
+        diagnostic('error', 'INVALID_AGGREGATION_ARGUMENT', 'COUNTROWS expects exactly one table argument, e.g. COUNTROWS(Sales).', node.span),
       ],
     }
   }
 
-  const targetModelTable = findModelTableByName(ctx.model, ctx.datasets, arg.table)
-  if (!targetModelTable) {
-    return {
-      diagnostics: [
-        diagnostic('error', 'UNKNOWN_TABLE', `Unknown table "${arg.table}". It isn't part of this model.`, arg.span, {
-          table: arg.table,
-        }),
-      ],
-    }
-  }
+  const tableResult = bindTableExpression(node.args[0], ctx)
+  if (!tableResult.bound) return { diagnostics: tableResult.diagnostics }
 
   return {
-    bound: { kind: 'CountRows', modelTableId: targetModelTable.id, label: `COUNTROWS(${arg.table})`, span: node.span },
-    diagnostics: [],
+    bound: { kind: 'CountRows', table: tableResult.bound, label: `COUNTROWS(${describeTableExpression(tableResult.bound)})`, span: node.span },
+    diagnostics: tableResult.diagnostics,
   }
 }
 
@@ -470,41 +511,38 @@ function bindAll(node: FunctionCallNode, ctx: MeasureBindContext): { modifier?: 
   }
 }
 
-/** Binds `FILTER(Table, predicate)` (sprint brief §17-§20). Always table-wide: it replaces every existing filter on `Table` (docs/CALCULATE.md). */
+function describeTableExpression(bound: BoundTableExpression): string {
+  switch (bound.kind) {
+    case 'BaseTable':
+      return bound.tableName
+    case 'FilterTable':
+      return bound.label
+    case 'ValuesTable':
+      return `VALUES(${bound.tableName}[${bound.columnName}])`
+    case 'DistinctTable':
+      return `DISTINCT(${bound.tableName}[${bound.columnName}])`
+  }
+}
+
+/**
+ * Binds `FILTER(Table, predicate)` as a CALCULATE filter modifier (sprint
+ * brief §17-§20). Delegates entirely to the shared table-expression binder
+ * (`bindTableExpression` → `BoundFilterTable`) so CALCULATE's FILTER and the
+ * standalone table-expression FILTER (used by COUNTROWS/iterators) are one
+ * implementation, not two (sprint brief §6-§7). Always table-wide: it
+ * replaces every existing filter on `Table` (docs/CALCULATE.md).
+ */
 function bindFilterFunction(node: FunctionCallNode, ctx: MeasureBindContext): { modifier?: FilterModifier; diagnostics: ExpressionDiagnostic[] } {
-  if (node.args.length !== 2) {
-    return {
-      diagnostics: [
-        diagnostic('error', 'INVALID_FUNCTION_ARGUMENT', 'FILTER expects exactly two arguments: FILTER(Table, predicate).', node.span),
-      ],
-    }
-  }
-
-  const [tableArg, predicateArg] = node.args
-  if (tableArg.kind !== 'TableReference') {
-    return {
-      diagnostics: [
-        diagnostic('error', 'INVALID_FUNCTION_ARGUMENT', 'The first argument to FILTER must be a table, e.g. FILTER(Products, ...).', tableArg.span),
-      ],
-    }
-  }
-
-  const modelTable = findModelTableByName(ctx.model, ctx.datasets, tableArg.table)
-  if (!modelTable) {
-    return { diagnostics: [diagnostic('error', 'UNKNOWN_TABLE', `Unknown table "${tableArg.table}".`, tableArg.span, { table: tableArg.table })] }
-  }
-
-  const tableName = tableDisplayName(ctx, modelTable.id)
-  const result = bindPredicateExpression(predicateArg, ctx.model, ctx.datasets, { modelTableId: modelTable.id, tableName })
-  if (!result.bound) return { diagnostics: result.diagnostics }
+  const result = bindTableExpression(node, ctx)
+  if (!result.bound || result.bound.kind !== 'FilterTable') return { diagnostics: result.diagnostics }
 
   return {
     modifier: {
       kind: 'PredicateFilter',
-      modelTableId: modelTable.id,
-      referencedColumns: dedupeColumnRefs(result.referencedColumns),
-      predicate: result.bound,
-      label: `FILTER(${tableName}, ${describeBoundPredicate(result.bound)})`,
+      modelTableId: result.bound.modelTableId,
+      referencedColumns: result.bound.referencedColumns,
+      predicate: result.bound.predicate,
+      label: result.bound.label,
       tableWide: true,
     },
     diagnostics: result.diagnostics,
@@ -583,6 +621,99 @@ function bindCalculate(node: FunctionCallNode, ctx: MeasureBindContext): Measure
   }
 }
 
+/** Binds `IF(condition, whenTrue, [whenFalse])` in measure context (sprint brief §30-§31). Missing `whenFalse` evaluates to BLANK at runtime — no diagnostic needed for omitting it. */
+function bindIfMeasure(node: FunctionCallNode, ctx: MeasureBindContext): MeasureBindResult {
+  if (node.args.length !== 2 && node.args.length !== 3) {
+    return {
+      diagnostics: [diagnostic('error', 'IF_INVALID_ARITY', 'IF expects IF(condition, valueIfTrue) or IF(condition, valueIfTrue, valueIfFalse).', node.span)],
+    }
+  }
+  const condition = bindMeasureNode(node.args[0], ctx)
+  const whenTrue = bindMeasureNode(node.args[1], ctx)
+  const whenFalse = node.args[2] ? bindMeasureNode(node.args[2], ctx) : undefined
+  const diagnostics = [...condition.diagnostics, ...whenTrue.diagnostics, ...(whenFalse?.diagnostics ?? [])]
+  if (!condition.bound || !whenTrue.bound || (node.args[2] && !whenFalse?.bound)) return { diagnostics }
+  return { bound: { kind: 'If', condition: condition.bound, whenTrue: whenTrue.bound, whenFalse: whenFalse?.bound, span: node.span }, diagnostics }
+}
+
+/** Binds `SWITCH(expression, value1, result1, ..., [default])`, including the canonical `SWITCH(TRUE(), cond1, r1, ...)` shape (sprint brief §34-§35). */
+function bindSwitchMeasure(node: FunctionCallNode, ctx: MeasureBindContext): MeasureBindResult {
+  if (node.args.length < 3) {
+    return {
+      diagnostics: [diagnostic('error', 'INVALID_SWITCH_ARGUMENT', 'SWITCH expects SWITCH(expression, value1, result1, ..., [default]).', node.span)],
+    }
+  }
+
+  const exprResult = bindMeasureNode(node.args[0], ctx)
+  const rest = node.args.slice(1)
+  const hasDefault = rest.length % 2 === 1
+  const pairArgs = hasDefault ? rest.slice(0, -1) : rest
+  const defaultArg = hasDefault ? rest[rest.length - 1] : undefined
+
+  const diagnostics: ExpressionDiagnostic[] = [...exprResult.diagnostics]
+  const cases: BoundMeasureSwitchCase[] = []
+  for (let i = 0; i < pairArgs.length; i += 2) {
+    const value = bindMeasureNode(pairArgs[i], ctx)
+    const result = bindMeasureNode(pairArgs[i + 1], ctx)
+    diagnostics.push(...value.diagnostics, ...result.diagnostics)
+    if (value.bound && result.bound) cases.push({ value: value.bound, result: result.bound })
+  }
+  const defaultResult = defaultArg ? bindMeasureNode(defaultArg, ctx) : undefined
+  if (defaultResult) diagnostics.push(...defaultResult.diagnostics)
+
+  if (!exprResult.bound || diagnostics.some((d) => d.severity === 'error')) return { diagnostics }
+
+  return { bound: { kind: 'Switch', expression: exprResult.bound, cases, defaultResult: defaultResult?.bound, span: node.span }, diagnostics }
+}
+
+/** Binds `SELECTEDVALUE(Table[Column], [alternateResult])` (sprint brief §37-§39). */
+function bindSelectedValue(node: FunctionCallNode, ctx: MeasureBindContext): MeasureBindResult {
+  if (node.args.length !== 1 && node.args.length !== 2) {
+    return {
+      diagnostics: [
+        diagnostic('error', 'SELECTEDVALUE_INVALID_ARGUMENT', 'SELECTEDVALUE expects SELECTEDVALUE(Table[Column]) or SELECTEDVALUE(Table[Column], alternateResult).', node.span),
+      ],
+    }
+  }
+
+  const [columnArg, alternateArg] = node.args
+  if (columnArg.kind !== 'ColumnReference' || columnArg.table === null) {
+    return {
+      diagnostics: [
+        diagnostic('error', 'SELECTEDVALUE_INVALID_ARGUMENT', 'The first argument to SELECTEDVALUE must be a column, e.g. SELECTEDVALUE(Customers[Country]).', columnArg.span),
+      ],
+    }
+  }
+
+  const modelTable = findModelTableByName(ctx.model, ctx.datasets, columnArg.table)
+  if (!modelTable) {
+    return { diagnostics: [diagnostic('error', 'UNKNOWN_TABLE', `Unknown table "${columnArg.table}".`, columnArg.tableSpan ?? columnArg.span, { table: columnArg.table })] }
+  }
+  const resolved = resolveTableRef(ctx.datasets, modelTable)
+  const column = resolved?.table.columns.find((c) => c.name.toLowerCase() === columnArg.column.toLowerCase())
+  if (!resolved || !column) {
+    return {
+      diagnostics: [diagnostic('error', 'UNKNOWN_COLUMN', `Unknown column "${columnArg.column}" on "${columnArg.table}".`, columnArg.columnSpan, { table: columnArg.table, column: columnArg.column })],
+    }
+  }
+
+  const alternate = alternateArg ? bindMeasureNode(alternateArg, ctx) : undefined
+  if (alternateArg && !alternate?.bound) return { diagnostics: alternate?.diagnostics ?? [] }
+
+  return {
+    bound: {
+      kind: 'SelectedValue',
+      column: { datasetId: resolved.dataset.id, tableId: resolved.table.id, columnId: column.id },
+      modelTableId: modelTable.id,
+      columnName: column.name,
+      tableName: resolved.table.name,
+      alternate: alternate?.bound,
+      span: node.span,
+    },
+    diagnostics: alternate?.diagnostics ?? [],
+  }
+}
+
 function bindMeasureFunctionCall(node: FunctionCallNode, ctx: MeasureBindContext): MeasureBindResult {
   const name = node.name.toUpperCase()
 
@@ -603,7 +734,7 @@ function bindMeasureFunctionCall(node: FunctionCallNode, ctx: MeasureBindContext
     }
   }
 
-  if (name === 'FILTER' || name === 'REMOVEFILTERS' || name === 'ALL') {
+  if (name === 'REMOVEFILTERS' || name === 'ALL') {
     return {
       diagnostics: [
         diagnostic(
@@ -614,6 +745,45 @@ function bindMeasureFunctionCall(node: FunctionCallNode, ctx: MeasureBindContext
         ),
       ],
     }
+  }
+
+  if (name === 'FILTER') {
+    return {
+      diagnostics: [
+        diagnostic(
+          'error',
+          'UNSUPPORTED_FUNCTION',
+          'FILTER is only supported as a CALCULATE filter argument or as the table argument to COUNTROWS/an iterator function (SUMX, AVERAGEX, MINX, MAXX, COUNTX), e.g. CALCULATE([Total Revenue], FILTER(...)) or SUMX(FILTER(...), ...).',
+          node.nameSpan,
+        ),
+      ],
+    }
+  }
+
+  if (name === 'VALUES' || name === 'DISTINCT') {
+    return {
+      diagnostics: [
+        diagnostic(
+          'error',
+          'UNSUPPORTED_FUNCTION',
+          `"${node.name}" is only supported as the table argument to COUNTROWS or an iterator function, e.g. COUNTROWS(${node.name}(Customers[Country])) or SUMX(${node.name}(Products[Category]), [Total Revenue]).`,
+          node.nameSpan,
+        ),
+      ],
+    }
+  }
+
+  if (name === 'IF') return bindIfMeasure(node, ctx)
+  if (name === 'SWITCH') return bindSwitchMeasure(node, ctx)
+  if (name === 'SELECTEDVALUE') return bindSelectedValue(node, ctx)
+  if (name === 'BLANK') {
+    if (node.args.length !== 0) {
+      return { diagnostics: [diagnostic('error', 'INVALID_FUNCTION_ARGUMENT', 'BLANK() takes no arguments.', node.span)] }
+    }
+    return { bound: { kind: 'Blank', span: node.span }, diagnostics: [] }
+  }
+  if (isIteratorFunctionName(name)) {
+    return bindIteratorCall(name, node, ctx)
   }
 
   if (name === 'RELATED') {

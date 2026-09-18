@@ -451,6 +451,81 @@ same-column-replacement semantics, the `FILTER`/`REMOVEFILTERS`/`ALL`
 design, the context-safe caching strategy, nested `CALCULATE`, the
 context-transition boundary, and known DAX compatibility limitations.
 
+## Sprint 9 implementation (Iterators, Table Expressions & Conditional Logic)
+
+```text
+runtime/tableExpression/          NEW — the canonical table-expression layer
+  tableExpressionTypes.ts           BoundTableExpression (BaseTable | FilterTable |
+                                     ValuesTable | DistinctTable) + lineage-preserving
+                                     EvaluatedTableExpression row types
+  tableExpressionBinder.ts          bindTableExpression() — the one binder CALCULATE's
+                                     FILTER modifier, COUNTROWS and every iterator share
+  tableExpressionEvaluator.ts       evaluateTableExpression() — respects the current
+                                     FilterContext for base tables; FILTER/VALUES/DISTINCT
+                                     all reduce to this one evaluator
+
+runtime/iterator/                 NEW — the iterator row-context layer
+  iteratorTypes.ts                  BoundIteratorExpression (per-row grammar: literals,
+                                     column reads, RELATED, measure refs, IF/SWITCH/BLANK,
+                                     arithmetic/comparison/logical) + BoundIteratorCall
+  iteratorBinder.ts                 bindIteratorRowExpression() / bindIteratorCall() —
+                                     binds SUMX/AVERAGEX/MINX/MAXX/COUNTX's row expression
+                                     once; scopes column reads to the iterator's own table
+  iteratorEvaluator.ts              evaluateIteratorRowExpression() — pure, model-free
+                                     per-row evaluator; measure-reference context
+                                     transition is injected as a callback (no
+                                     binder/evaluator import cycle with measureEvaluator.ts)
+
+expression/
+  parser.ts                        + TRUE()/FALSE() as a zero-argument literal call
+                                     (needed for the canonical SWITCH(TRUE(), ...) shape)
+  diagnostics.ts                   + iterator/table-expression/conditional diagnostic codes
+  trace.ts                         + iterator | table-expression | context-transition |
+                                     conditional | switch-case trace node kinds
+  scalarComparison.ts              NEW — compareScalarValues extracted from
+                                     runtime/measure/booleanFilter.ts (which re-exports it)
+                                     so the expression layer (calculated-column
+                                     evaluator, iterator evaluator) doesn't have to
+                                     depend on the runtime layer for a pure scalar utility
+  binder.ts                        + BoundComparison/BoundLogical/BoundIf/BoundSwitch/
+                                     BoundBlank — calculated columns gain the
+                                     comparison/logical/conditional support Sprint 8
+                                     deliberately deferred (CALCULATE itself stays rejected)
+  evaluator.ts                     + matching Comparison/Logical/If/Switch/Blank
+                                     evaluation, row-by-row
+  measureBinder.ts                 + BoundMeasureIf/BoundMeasureSwitch/BoundMeasureBlank/
+                                     BoundSelectedValue/BoundIteratorCall; COUNTROWS
+                                     generalized from a bare modelTableId to a
+                                     BoundTableExpression; FILTER's CALCULATE-modifier
+                                     binding now delegates to bindTableExpression instead
+                                     of duplicating predicate binding
+
+runtime/measure/
+  contextModifier.ts               PredicateFilter's row-scan now delegates to
+                                     evaluateTableExpression instead of its own scan loop
+                                     — CALCULATE's FILTER and the standalone
+                                     FILTER/SUMX path are one implementation, not two
+  aggregation.ts                   + computeIteratorAggregation() (SUMX/AVERAGEX/MINX/
+                                     MAXX/COUNTX fold with structured type-error diagnostics)
+  measureEvaluator.ts               + evaluateIteratorCall()/evaluateIteratorMeasureReference()
+                                     (the bounded, cache-safe context-transition mechanism)
+                                     and evaluateSelectedValue(); CountRows dispatch now
+                                     goes through evaluateTableExpression
+```
+
+No new UI components were needed here either: `Visual` components and the
+Context Explorer already consume `evaluateMeasure`'s output generically, so a
+`SUMX`/`IF`/`SELECTEDVALUE` measure "just works" the moment it's created —
+see [`docs/ITERATORS.md`](./docs/ITERATORS.md) and
+[`docs/TABLE_EXPRESSIONS.md`](./docs/TABLE_EXPRESSIONS.md) for the full
+design, known DAX compatibility limitations, and
+`tests/runtime/visual/iteratorVisual.test.ts` /
+`tests/runtime/validation/semanticValidation.test.ts` for the zero-new-code
+integration proofs. All Sprint 1-8 tests remain green — the two Sprint 8
+tests whose *diagnostic code* (not behavior) changed as a direct result of
+the FILTER refactor were updated in place (see `docs/TABLE_EXPRESSIONS.md`
+"FILTER — one implementation, two callers").
+
 ## Expression strategy
 
 Do not implement full DAX.
@@ -472,5 +547,21 @@ time: comparison/logical operators are a pure grammar addition, `CALCULATE`/
 parser grammar, and CALCULATE's context modification plugs into the exact
 Sprint 4 `FilterContext`/relationship-propagation/aggregation architecture
 predicted back then — see [`docs/CALCULATE.md`](./docs/CALCULATE.md).
+
+Sprint 9 (Iterators/Table Expressions/Conditional Logic) proves it a third
+time, at real scale: `SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX`, `VALUES`,
+`DISTINCT`, `IF`, `SWITCH`, `BLANK` and `SELECTEDVALUE` are all still
+ordinary `FunctionCallNode`s parsed with **zero grammar changes** (the one
+exception — `TRUE()`/`FALSE()` as a literal call — is a single parser
+addition, not a rewrite). The genuinely new architecture is two small,
+focused layers (`runtime/tableExpression/`, `runtime/iterator/`) that plug
+into the *existing* `FilterContext`/relationship-propagation/
+`MeasureEvalContext` machinery rather than replacing any of it — `FILTER`
+went from a CALCULATE-only side effect to a reusable table-expression
+primitive that CALCULATE itself now consumes, and iterator measure
+references reuse `CALCULATE`'s own context-safe nested-scope pattern for
+their row-level context transition. No parallel DAX engine was built — see
+[`docs/ITERATORS.md`](./docs/ITERATORS.md) and
+[`docs/TABLE_EXPRESSIONS.md`](./docs/TABLE_EXPRESSIONS.md).
 
 The language may look DAX-like, but semantics and supported functions must be explicit.

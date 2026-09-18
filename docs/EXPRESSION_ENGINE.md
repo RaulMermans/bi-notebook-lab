@@ -90,10 +90,27 @@ Sprint 8 adds `CALCULATE`, `FILTER`, `REMOVEFILTERS` and `ALL` to measure
 mode only (comparison/logical operators are also valid as a *general* scalar
 measure result, e.g. `[Total Revenue] > 100`) — see
 [`CALCULATE.md`](./CALCULATE.md) for the full grammar, binding rules and
-context-modification architecture. Using `CALCULATE`/`FILTER`/
-`REMOVEFILTERS`/`ALL` inside a **calculated column** is rejected with
-`CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED` — context transition remains
-out of scope. Time intelligence remains out of scope for both modes.
+context-modification architecture. Using `CALCULATE` inside a **calculated
+column** is rejected with `CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED` —
+context transition remains out of scope for calculated columns.
+
+Sprint 9 adds a **third layer** on top of the same lexer/parser/AST: a
+table-expression binder/evaluator (`FILTER`/`VALUES`/`DISTINCT`, reused by
+both `CALCULATE` and the iterator functions — see
+[`TABLE_EXPRESSIONS.md`](./TABLE_EXPRESSIONS.md)) and an iterator row-context
+binder/evaluator (`SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX` — see
+[`ITERATORS.md`](./ITERATORS.md)). It also extends **both** existing binder
+modes with `IF`/`SWITCH`/`BLANK`/`TRUE()`/`FALSE()`, and lifts calculated
+columns' Sprint 8 restriction on comparison/logical operators (`Sales[Revenue]
+> 100` now binds in a calculated column, sharing the same
+`compareScalarValues` scalar semantics measures already used — see
+`src/expression/scalarComparison.ts`). `SELECTEDVALUE` is measure-only (it
+reads the current FilterContext, which only measures have). No grammar
+changes were needed for any of this — every new function is an ordinary
+`FunctionCallNode` the existing parser already produces (the one small parser
+addition is `TRUE()`/`FALSE()` as a zero-argument literal call, needed for the
+canonical `SWITCH(TRUE(), ...)` shape). Time intelligence remains out of
+scope for both modes.
 
 ## AST (`src/expression/ast.ts`)
 

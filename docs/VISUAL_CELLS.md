@@ -1,4 +1,4 @@
-# Visual Cells (Sprint 7 + Sprint 8)
+# Visual Cells (Sprint 7 + Sprint 8 + Sprint 9)
 
 Sprint 7 completes the MVP learning loop by adding a bounded visualization
 layer on top of the Sprint 2–6 semantic model / measure / filter-context
@@ -15,6 +15,16 @@ Table correctly combines its own per-member filter with a `CALCULATE`
 measure's internal context. **Zero lines changed in `runtime/visual/*`** —
 see [`CALCULATE.md`](./CALCULATE.md) "Visual Cells integration" and
 `tests/runtime/visual/calculateVisual.test.ts`.
+
+**Sprint 9 update:** the same is true of iterator (`SUMX`/`AVERAGEX`/`MINX`/
+`MAXX`/`COUNTX`) and conditional (`IF`/`SWITCH`/`SELECTEDVALUE`) measures — a
+KPI on `Selected Country` (`SELECTEDVALUE`) reacts to a slicer the same way a
+`CALCULATE` measure does, and a grouped Bar/Table computing a `SUMX` measure
+per member gets that member's category filter folded into the iterator's
+table expression automatically, purely because `evaluateMeasure` is still the
+one and only thing every Visual calls. **Zero lines changed in
+`runtime/visual/*`** — see [`docs/ITERATORS.md`](./ITERATORS.md) "Visual Cell
+integration" and `tests/runtime/visual/iteratorVisual.test.ts`.
 
 ## Product boundary
 

@@ -3,7 +3,10 @@ import type { ColumnRef, SemanticModel } from '../../domain/model'
 import type { ComparisonOperator, Expression, LogicalOperator, SourceSpan } from '../../expression/ast'
 import { findModelTableByName } from '../../expression/binder'
 import { diagnostic, type ExpressionDiagnostic } from '../../expression/diagnostics'
+import { compareScalarValues } from '../../expression/scalarComparison'
 import { resolveTableRef } from '../model/modelRuntime'
+
+export { compareScalarValues } from '../../expression/scalarComparison'
 
 /**
  * The bound form of a CALCULATE/FILTER boolean filter expression — a small,
@@ -300,53 +303,6 @@ export function describeBoundPredicate(node: BoundPredicateNode): string {
       return `${describeBoundPredicate(node.left)} ${node.operator} ${describeBoundPredicate(node.right)}`
     case 'Logical':
       return `(${describeBoundPredicate(node.left)} ${node.operator} ${describeBoundPredicate(node.right)})`
-  }
-}
-
-/**
- * Documented blank-comparison semantics for the bounded Sprint 8 boolean
- * subset (sprint brief §10 "Document exact blank comparison semantics"):
- *
- * - `=`:  BLANK = BLANK is true; BLANK = anything-else is false. No implicit
- *   coercion of blank to 0/"" the way some real-DAX contexts do.
- * - `<>`: the exact negation of `=` above.
- * - `> >= < <=`: any comparison involving a blank operand is **never true**
- *   (a blank never satisfies a relational comparison) — this is simpler than
- *   real DAX's blank-coercion rules and is a documented incompatibility (see
- *   docs/CALCULATE.md "Known limitations").
- * - Comparing two non-blank values of **different JS types** never coerces
- *   (sprint brief §52 "do not silently coerce arbitrary strings to
- *   numbers"): `=` is false, `<>` is true, relational operators are false.
- */
-export function compareScalarValues(operator: ComparisonOperator, left: unknown, right: unknown): boolean {
-  const leftBlank = left === null || left === undefined
-  const rightBlank = right === null || right === undefined
-
-  if (leftBlank || rightBlank) {
-    if (operator === '=') return leftBlank && rightBlank
-    if (operator === '<>') return !(leftBlank && rightBlank)
-    return false
-  }
-
-  if (typeof left !== typeof right) {
-    if (operator === '=') return false
-    if (operator === '<>') return true
-    return false
-  }
-
-  switch (operator) {
-    case '=':
-      return left === right
-    case '<>':
-      return left !== right
-    case '>':
-      return (left as number | string) > (right as number | string)
-    case '>=':
-      return (left as number | string) >= (right as number | string)
-    case '<':
-      return (left as number | string) < (right as number | string)
-    case '<=':
-      return (left as number | string) <= (right as number | string)
   }
 }
 

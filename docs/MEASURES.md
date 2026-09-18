@@ -155,9 +155,32 @@ Sprint 4 function whose whole purpose is safe division.
   ISO-8601 date/datetime strings, but not for arbitrary types.
 
 See [`CALCULATE.md`](./CALCULATE.md) for `CALCULATE`/`FILTER`/
-`REMOVEFILTERS`/`ALL` (Sprint 8) and their own known limitations —
-iterators (`SUMX`/`AVERAGEX`), `VALUES`/`DISTINCT`/`SELECTEDVALUE`,
-`IF`/`SWITCH` and time intelligence remain out of scope.
+`REMOVEFILTERS`/`ALL` (Sprint 8), [`docs/ITERATORS.md`](./ITERATORS.md) for
+`SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX` and [`docs/TABLE_EXPRESSIONS.md`](./TABLE_EXPRESSIONS.md)
+for `VALUES`/`DISTINCT` as reusable table expressions (Sprint 9). Measures
+also now support `IF`, `SWITCH`, `BLANK()` and `SELECTEDVALUE` — see
+"Conditional logic and SELECTEDVALUE" below. Time intelligence remains out of
+scope.
+
+### Conditional logic and SELECTEDVALUE (Sprint 9)
+
+`IF(condition, whenTrue, [whenFalse])` and `SWITCH(expression, value1,
+result1, ..., [default])` — including the canonical `SWITCH(TRUE(), cond1,
+r1, cond2, r2, ..., default)` shape — work as ordinary scalar measure
+expressions, react to the current FilterContext through whatever measures
+their branches reference, and evaluate branches lazily (only the taken
+branch's diagnostics/side effects apply). `BLANK()` returns the same internal
+`null` every other blank result already uses — there is no second blank
+representation.
+
+`SELECTEDVALUE(Table[Column], [alternateResult])` returns the column's single
+distinct visible value under the current FilterContext, or `alternateResult`
+(default `BLANK`) when zero or more than one distinct value is visible. It
+shares its "distinct visible values" computation with `VALUES(Column)`
+(`docs/TABLE_EXPRESSIONS.md`) rather than a second value-resolution
+mechanism — `SELECTEDVALUE(Customers[Country], "Multiple Countries")` is
+conceptually "if `COUNTROWS(VALUES(Customers[Country]))` = 1, return that one
+value, else the alternate."
 
 ## Measure references and dependencies
 

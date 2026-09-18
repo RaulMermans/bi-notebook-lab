@@ -218,12 +218,12 @@ describe('bind', () => {
     expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED' })])
   })
 
-  it('rejects a comparison expression in a calculated column without silently producing an empty result', () => {
+  it('binds a comparison expression in a calculated column (Sprint 9 lifts the Sprint 8 restriction — sprint brief §32-§33)', () => {
     const { model, datasets, salesTableId } = baseModel()
     const parsed = parseExpression('Sales[Revenue] > 100')
     const result = bind(parsed.expression!, { model, datasets, currentModelTableId: salesTableId })
 
-    expect(result.bound).toBeUndefined()
-    expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'UNSUPPORTED_FUNCTION' })])
+    expect(result.diagnostics).toEqual([])
+    expect(result.bound).toEqual(expect.objectContaining({ kind: 'Comparison', operator: '>' }))
   })
 })
