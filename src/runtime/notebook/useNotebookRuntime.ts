@@ -3,6 +3,7 @@ import type { CalculatedColumnCell, MeasureCell, ModelCell, NotebookCell, TestCe
 import type { Dataset } from '../../domain/data'
 import type { ColumnRef, TableRef } from '../../domain/model'
 import type { ValidationSpec } from '../../domain/validation'
+import type { VisualSpec } from '../../domain/visual'
 import { deleteDataset, loadDatasets, loadNotebook, saveDataset, saveNotebook } from '../../persistence/notebookStore'
 import { deleteModel, loadModels, saveModel } from '../../persistence/modelStore'
 import type { CalculatedColumnInput } from '../calculatedColumn/calculatedColumnRuntime'
@@ -162,6 +163,15 @@ export function useNotebookRuntime() {
       },
       removeTestCell(cellId: string): void {
         runtime.removeTestCell(cellId)
+      },
+      createVisualCell(modelId: string, visual: VisualSpec, title?: string) {
+        return runtime.createVisualCell(modelId, visual, title)
+      },
+      updateVisualCell(cellId: string, patch: Partial<VisualSpec>, title?: string): void {
+        runtime.updateVisualCell(cellId, patch, title)
+      },
+      removeVisualCell(cellId: string): void {
+        runtime.removeVisualCell(cellId)
       },
     }),
     [runtime],

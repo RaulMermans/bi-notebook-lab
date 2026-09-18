@@ -255,4 +255,43 @@ describe('NotebookRuntime', () => {
     expect(snapshot.notebook.cells).toHaveLength(2)
     expect(snapshot.models[model.id].measures).toHaveLength(0)
   })
+
+  it('creates a VisualCell with no validation step (a VisualSpec is authored data, like a ValidationSpec)', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+    const measure = runtime.createMeasureCell(model.id, {
+      homeModelTableId: salesTableId,
+      name: 'Total Revenue',
+      expression: 'SUM(Sales[Revenue])',
+    })
+
+    const cell = runtime.createVisualCell(model.id, { id: 'v1', type: 'kpi', measureId: measure.measure!.id }, 'Total Revenue KPI')
+
+    const snapshot = runtime.getSnapshot()
+    expect(snapshot.notebook.cells).toHaveLength(4)
+    expect(snapshot.notebook.cells[3]).toMatchObject({ id: cell.id, kind: 'visual', modelId: model.id, title: 'Total Revenue KPI' })
+    expect((snapshot.notebook.cells[3] as typeof cell).visual).toEqual({ id: 'v1', type: 'kpi', measureId: measure.measure!.id })
+  })
+
+  it('updates a VisualCell field mapping in place, without deleting/recreating the cell', () => {
+    const { runtime, model } = withSalesModel()
+    const cell = runtime.createVisualCell(model.id, { id: 'v1', type: 'slicer', column: { datasetId: 'sales-ds', tableId: 'sales-ds-table', columnId: 'revenue-col' }, mode: 'single' })
+
+    runtime.updateVisualCell(cell.id, { mode: 'multi' }, 'Renamed Slicer')
+
+    const snapshot = runtime.getSnapshot()
+    expect(snapshot.notebook.cells).toHaveLength(3)
+    const updated = snapshot.notebook.cells.find((c) => c.id === cell.id)!
+    expect(updated.title).toBe('Renamed Slicer')
+    expect((updated as typeof cell).visual).toMatchObject({ mode: 'multi', column: cell.visual.column })
+  })
+
+  it('removes a VisualCell (a VisualSpec has no separate persisted state to clean up)', () => {
+    const { runtime, model } = withSalesModel()
+    const cell = runtime.createVisualCell(model.id, { id: 'v1', type: 'kpi', measureId: 'does-not-matter' })
+
+    runtime.removeVisualCell(cell.id)
+
+    const snapshot = runtime.getSnapshot()
+    expect(snapshot.notebook.cells).toHaveLength(2)
+  })
 })

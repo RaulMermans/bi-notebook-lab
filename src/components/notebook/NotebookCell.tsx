@@ -2,8 +2,10 @@ import type { NotebookCell as NotebookCellModel } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
 import type { CalculatedColumn, ColumnRef, Measure, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
 import type { ValidationRun } from '../../domain/validation'
+import type { VisualSpec } from '../../domain/visual'
 import type { ExpressionDiagnostic } from '../../expression/diagnostics'
 import type { CalculatedColumnExecution } from '../../runtime/calculatedColumn/calculatedColumnRuntime'
+import type { FilterContext } from '../../runtime/measure/filterContext'
 import type { MeasureExecution } from '../../runtime/measure/measureRuntime'
 import { NotebookCellCard } from '../NotebookCellCard'
 import { CalculatedColumnCellCard } from './CalculatedColumnCellCard'
@@ -11,6 +13,7 @@ import { DataCellCard } from './DataCellCard'
 import { MeasureCellCard } from './MeasureCellCard'
 import { ModelCellCard } from './ModelCellCard'
 import { TestCellCard } from './TestCellCard'
+import { VisualCellCard } from './VisualCellCard'
 
 interface NotebookCellProps {
   cell: NotebookCellModel
@@ -43,6 +46,11 @@ interface NotebookCellProps {
   staleTestCellIds: Set<string>
   onRunValidation: (cellId: string) => void
   onRemoveTestCell: (cellId: string) => void
+  notebookVisualContext: FilterContext
+  slicerSelections: Record<string, unknown[]>
+  onSlicerChange: (cellId: string, values: unknown[]) => void
+  onUpdateVisualCell: (cellId: string, patch: Partial<VisualSpec>, title?: string) => void
+  onRemoveVisualCell: (cellId: string) => void
 }
 
 /** Dispatches a notebook cell to its renderer. `data`, `model`, `calculated-column` and `measure` are functional so far. */
@@ -66,6 +74,11 @@ export function NotebookCell({
   staleTestCellIds,
   onRunValidation,
   onRemoveTestCell,
+  notebookVisualContext,
+  slicerSelections,
+  onSlicerChange,
+  onUpdateVisualCell,
+  onRemoveVisualCell,
 }: NotebookCellProps) {
   if (cell.kind === 'data') {
     const dataset = datasets[cell.datasetId]
@@ -127,6 +140,22 @@ export function NotebookCell({
         hasStaleRun={staleTestCellIds.has(cell.id)}
         onRun={() => onRunValidation(cell.id)}
         onRemove={() => onRemoveTestCell(cell.id)}
+      />
+    )
+  }
+
+  if (cell.kind === 'visual') {
+    const model = models[cell.modelId]
+    return (
+      <VisualCellCard
+        cell={cell}
+        model={model}
+        datasets={datasets}
+        notebookContext={notebookVisualContext}
+        slicerSelection={slicerSelections[cell.id] ?? []}
+        onSlicerChange={(values) => onSlicerChange(cell.id, values)}
+        onUpdate={(patch, title) => onUpdateVisualCell(cell.id, patch, title)}
+        onRemove={() => onRemoveVisualCell(cell.id)}
       />
     )
   }

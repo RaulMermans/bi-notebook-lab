@@ -43,8 +43,10 @@ The first product milestone is not a dashboard builder. It is a **learning runti
 
 Sprint 1 (Data Runtime), Sprint 2 (Semantic Model Runtime), Sprint 3
 (Calculated Columns & Row Context), Sprint 4 (Measures & Filter Context),
-Sprint 5 (Validation Engine) and Sprint 6 (Context Visualizer) are complete.
-This repository now contains:
+Sprint 5 (Validation Engine), Sprint 6 (Context Visualizer) and Sprint 7
+(Visual Cells) are complete — the full MVP learning loop (import → model →
+calculated columns → measures → filter context → visualize → validate) now
+works end to end. This repository now contains:
 
 - product and architecture contracts
 - notebook/cell domain types as a discriminated union, including functional
@@ -92,6 +94,14 @@ This repository now contains:
   unfiltered, active/inactive relationship state, before/after impact), a
   plain-English narrative at two detail levels, and a measure's dependency
   chain when it references other measures
+- **Visual Cells** — `KPI`, `Table`, `Bar`, `Line` and `Slicer`, each a real
+  typed notebook cell backed by a Visual Runtime that executes purely
+  through the same Sprint 4 `evaluateMeasure` (no second aggregation
+  engine): Bar/Line/Table-with-a-dimension re-evaluate the configured
+  measure(s) once per distinct member under a merged filter context; a
+  Slicer emits a canonical column filter into a shared, transient notebook
+  filter context that every other Visual reads, so multiple slicers combine
+  with AND semantics and clearing one never touches another's filter
 
 `CALCULATE`, `FILTER`, bidirectional/many-to-many relationships and time
 intelligence are **not** implemented yet — see
@@ -127,6 +137,13 @@ measure, add filters (e.g. `Customers[Country] = Spain`), and watch the
 relationship-propagation diagram, baseline/current comparison, and
 plain-English narrative update from the real runtime.
 
+Use **+ Add Visual** to create a KPI on `Total Revenue`, a Bar chart of
+`Products[Category]` by `Total Revenue`, a Line chart of `Calendar[Date]` by
+`Total Revenue`, a Table of `Customers[Country]` with `Total Revenue`/
+`Orders`/`Average Order Value`, and a `Customers[Country]` Slicer — then pick
+a country and watch every visual recompute together, matching the exact
+number the Context Explorer shows for the same filter.
+
 ## Core documents
 
 - [`PRODUCT.md`](./PRODUCT.md)
@@ -142,6 +159,7 @@ plain-English narrative update from the real runtime.
 - [`docs/MEASURES.md`](./docs/MEASURES.md)
 - [`docs/FILTER_CONTEXT.md`](./docs/FILTER_CONTEXT.md)
 - [`docs/CONTEXT_VISUALIZER.md`](./docs/CONTEXT_VISUALIZER.md)
+- [`docs/VISUAL_CELLS.md`](./docs/VISUAL_CELLS.md)
 
 ## Scope guardrail
 

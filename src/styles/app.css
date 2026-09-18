@@ -337,6 +337,44 @@ pre { overflow-x: auto; background: #181818; color: #f3f3f3; padding: 16px; bord
 .row-vs-filter-context-note__card dd { margin: 0; font-weight: 600; text-align: right; }
 .row-vs-filter-context-note__card code { font-size: 11px; }
 
+/* Sprint 7 — Visual Cells */
+
+.visual { display: grid; gap: 8px; }
+.visual__title { margin: 0; font-weight: 700; font-size: 15px; }
+.visual__caption { margin: 0; color: #9d9d9d; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+.visual__empty, .visual__error { margin: 0; color: #9d9d9d; font-size: 13px; }
+.visual--error .visual__error { color: #7a1712; background: #fdecea; border: 1px solid #f3c8c4; border-radius: 8px; padding: 8px 12px; }
+.visual__notice { margin: 0; font-size: 12px; color: #7a4b00; background: #fdf3e3; border: 1px solid #f3ddb0; border-radius: 8px; padding: 6px 10px; }
+.visual__summary { margin: 0; font-size: 12px; color: #74746f; }
+.visual__header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+.visual--kpi { text-align: left; }
+.visual__kpi-value { margin: 0; font-size: 40px; font-weight: 800; letter-spacing: -.02em; }
+
+.visual-chart { width: 100%; }
+
+.visual-table-scroll { max-height: 360px; overflow: auto; border: 1px solid #ececea; border-radius: 10px; }
+.visual-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.visual-table th, .visual-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #f0f0ec; white-space: nowrap; }
+.visual-table thead th { position: sticky; top: 0; background: #fafaf8; }
+.visual-table__sort { all: unset; cursor: pointer; font-weight: 700; }
+.visual-table__sort:hover { text-decoration: underline; }
+
+.slicer-options { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 240px; overflow-y: auto; }
+.slicer-option { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+
+.cell--visual .cell__header-actions { display: flex; gap: 4px; align-items: center; }
+
+.visual-fields-form { display: grid; gap: 12px; }
+.visual-fields-form__fields { display: grid; gap: 12px; }
+.visual-fields-form__field { display: grid; gap: 4px; }
+.visual-fields-form__field label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #9d9d9d; }
+.visual-fields-form__picker { display: flex; gap: 8px; flex-wrap: wrap; }
+.visual-fields-form__picker select { border: 1px solid #d2d2cf; border-radius: 8px; padding: 6px 8px; min-width: 140px; }
+.visual-fields-form__field select, .visual-fields-form__field input[type="text"] { border: 1px solid #d2d2cf; border-radius: 8px; padding: 6px 8px; min-width: 140px; }
+.visual-fields-form__checkboxes { display: flex; gap: 12px; flex-wrap: wrap; }
+.visual-fields-form__checkbox { display: flex; align-items: center; gap: 6px; font-size: 13px; text-transform: none; letter-spacing: normal; color: #171717; }
+
 @media (max-width: 760px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { display: none; }

@@ -1,7 +1,8 @@
-import type { CalculatedColumnCell, GenericNotebookCell, MeasureCell, ModelCell, NotebookCell, NotebookDocument, TestCell } from '../../domain/notebook'
+import type { CalculatedColumnCell, GenericNotebookCell, MeasureCell, ModelCell, NotebookCell, NotebookDocument, TestCell, VisualCell } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
 import type { CalculatedColumn, ColumnRef, Measure, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
 import type { ValidationSpec } from '../../domain/validation'
+import type { VisualSpec } from '../../domain/visual'
 import type { ExpressionDiagnostic } from '../../expression/diagnostics'
 import { generateId } from '../../lib/ids'
 import * as calculatedColumnRuntime from '../calculatedColumn/calculatedColumnRuntime'
@@ -366,6 +367,42 @@ export class NotebookRuntime {
 
   /** Removes a TestCell. A ValidationSpec has no separate persisted state to clean up — it lives entirely on the cell. */
   removeTestCell(cellId: string): void {
+    this.removeCell(cellId)
+  }
+
+  /**
+   * Appends a `VisualCell`. Unlike `MeasureCell`/`CalculatedColumnCell`
+   * there is no expression to validate at create time — a `VisualSpec` is
+   * just field-mapping data, mirroring `TestCell`'s `ValidationSpec`
+   * (docs/VISUAL_CELLS.md). A visual referencing a since-deleted
+   * measure/column fails safely at render time instead (see
+   * `runtime/visual/*` diagnostics).
+   */
+  createVisualCell(modelId: string, visual: VisualSpec, title?: string): VisualCell {
+    const cell: VisualCell = {
+      id: generateId('cell'),
+      kind: 'visual',
+      title: title ?? visual.title ?? visual.type,
+      modelId,
+      visual,
+      status: 'idle',
+    }
+    this.addCell(cell)
+    return cell
+  }
+
+  /** Replaces a VisualCell's field mapping in place, so editing a visual never requires deleting/recreating the cell (brief §44). */
+  updateVisualCell(cellId: string, patch: Partial<VisualSpec>, title?: string): void {
+    const cells = this.snapshot.notebook.cells.map((cell) => {
+      if (cell.id !== cellId || cell.kind !== 'visual') return cell
+      const visual = { ...cell.visual, ...patch } as VisualSpec
+      return { ...cell, visual, title: title ?? cell.title }
+    })
+    this.commit({ ...this.snapshot.notebook, cells })
+  }
+
+  /** Removes a VisualCell. A VisualSpec has no separate persisted state to clean up — it lives entirely on the cell, mirroring TestCell. */
+  removeVisualCell(cellId: string): void {
     this.removeCell(cellId)
   }
 }

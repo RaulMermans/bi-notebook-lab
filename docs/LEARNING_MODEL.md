@@ -58,6 +58,19 @@ filter shows exactly which tables are directly filtered vs. propagated-into,
 in which direction, and what the measure's baseline vs. current result is —
 using the real Sprint 4 runtime, never a reconstructed explanation.
 
+## Visual Cells as concrete proof of these levels
+
+The Sprint 7 Visual Cells (see [`VISUAL_CELLS.md`](./VISUAL_CELLS.md)) give
+a learner a second, complementary way to check the same Level 4/5 questions
+the Context Explorer answers diagnostically: instead of inspecting one
+measure under one chosen filter, a KPI/Bar/Line/Table/Slicer combination
+lets a learner *watch* a real number change as they pick a Country in a
+Slicer, and compare it directly against what the Context Explorer already
+showed for the same filter — the same underlying `evaluateMeasure` call
+either way. Where the Context Explorer explains *why* a result changed, a
+Visual Cell simply shows the result changing, which is closer to how a
+learner will eventually use Power BI itself.
+
 ## Validation as feedback on these levels
 
 The Sprint 5 validation engine (see

@@ -1,20 +1,39 @@
 import { useMemo, useState } from 'react'
 import { AddTestCellPanel } from './components/notebook/AddTestCellPanel'
+import { AddVisualCellPanel } from './components/notebook/AddVisualCellPanel'
 import { CreateCalculatedColumnPanel } from './components/notebook/CreateCalculatedColumnPanel'
 import { CreateMeasurePanel } from './components/notebook/CreateMeasurePanel'
 import { ImportDataPanel } from './components/notebook/ImportDataPanel'
 import { NotebookCell } from './components/notebook/NotebookCell'
 import type { ValidationRun } from './domain/validation'
+import { buildSlicerFilter } from './runtime/visual/visualRuntime'
 import { isValidationRunStale } from './runtime/validation/fingerprint'
 import { computeNotebookScore } from './runtime/validation/scoring'
 import { runValidation } from './runtime/validation/validationEngine'
 import { useNotebookRuntime } from './runtime/notebook/useNotebookRuntime'
+import { useNotebookVisualContext } from './runtime/notebook/useNotebookVisualContext'
 import './styles/app.css'
 
 export default function App() {
   const { notebook, datasets, models, status, actions } = useNotebookRuntime()
   const hasCells = notebook.cells.length > 0
   const [validationRuns, setValidationRuns] = useState<Record<string, ValidationRun>>({})
+  const visualContext = useNotebookVisualContext()
+
+  const slicerSelections = useMemo(() => {
+    const selections: Record<string, unknown[]> = {}
+    for (const [cellId, filter] of Object.entries(visualContext.bySlicer)) {
+      selections[cellId] = filter.values
+    }
+    return selections
+  }, [visualContext.bySlicer])
+
+  function handleSlicerChange(cellId: string, values: unknown[]) {
+    const cell = notebook.cells.find((c) => c.id === cellId)
+    if (!cell || cell.kind !== 'visual' || cell.visual.type !== 'slicer') return
+    const filter = buildSlicerFilter(cell.visual.column, values, cell.visual.mode)
+    visualContext.setSlicerFilter(cellId, filter)
+  }
 
   const testCells = useMemo(() => notebook.cells.filter((cell) => cell.kind === 'test'), [notebook.cells])
 
@@ -104,6 +123,11 @@ export default function App() {
                 staleTestCellIds={staleTestCellIds}
                 onRunValidation={handleRunValidation}
                 onRemoveTestCell={actions.removeTestCell}
+                notebookVisualContext={visualContext.filterContext}
+                slicerSelections={slicerSelections}
+                onSlicerChange={handleSlicerChange}
+                onUpdateVisualCell={actions.updateVisualCell}
+                onRemoveVisualCell={actions.removeVisualCell}
               />
             ))}
             <div className="notebook__add-actions">
@@ -114,6 +138,7 @@ export default function App() {
               <CreateCalculatedColumnPanel models={models} datasets={datasets} onCreate={actions.createCalculatedColumnCell} />
               <CreateMeasurePanel models={models} datasets={datasets} onCreate={actions.createMeasureCell} />
               <AddTestCellPanel models={models} onCreate={actions.createTestCell} />
+              <AddVisualCellPanel models={models} datasets={datasets} onCreate={actions.createVisualCell} />
             </div>
           </div>
         )}

@@ -151,6 +151,28 @@ Filter context state is UI-only and never persisted — reloading the
 notebook always starts a measure back at "no filters", by design (spec
 §53).
 
+## FilterContext merge (Sprint 7)
+
+`mergeFilterContexts(base, additional)` (added to this module in Sprint 7)
+is the canonical way to combine two `FilterContext`s — used by the Visual
+Runtime to intersect the shared notebook/slicer context with a grouped
+Visual's own per-member filter. Different columns AND together; the same
+column **intersects** its value sets rather than appending a second,
+contradictory constraint (so `Country IN [Spain, France]` merged with
+`Country = Spain` collapses to `Country = Spain`, and two flatly
+contradictory filters collapse to an empty, deterministically-zero-row value
+set rather than silently picking one side). See
+[`VISUAL_CELLS.md`](./VISUAL_CELLS.md) for the full design and the one
+learner-visible consequence (blank grouped rows when a Visual's dimension
+matches an active Slicer's own column).
+
+The Sprint 7 `NotebookVisualContext` (`useNotebookVisualContext.ts`) is a
+separate piece of transient UI state from this file's `ColumnFilter`/
+`FilterContext` — built on the same primitives, but never shared with
+`ContextFilterEditor`'s state (deliberately: Context Explorer is a
+diagnostic surface, Visual Cells are notebook output — see
+`VISUAL_CELLS.md`).
+
 ## Known limitations
 
 - Only `equals`/`in` — no comparison operators (`>`, `<`, ranges), no

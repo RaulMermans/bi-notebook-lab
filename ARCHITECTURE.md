@@ -325,6 +325,69 @@ design, including a real pointer-events/accessibility pitfall (React Flow's
 edge-label/node wrappers set an inherited `pointer-events: none`) found and
 fixed during manual browser verification.
 
+## Sprint 7 implementation (Visual Cells)
+
+```text
+domain/visual.ts                VisualSpec union (Kpi/Table/Bar/Line/Slicer),
+                                 VISUAL_CARDINALITY_LIMITS
+domain/notebook.ts               VisualCell (real cell kind, promoted out of
+                                  GenericCellKind, mirroring Sprint 3/4/5's cells)
+
+runtime/visual/
+  types.ts                        VisualDiagnostic, VisualDataRow,
+                                   VisualQueryResult, KpiQueryResult
+  grouping.ts                     getDistinctVisualMembers, evaluateGroupedRows —
+                                   the "N members x M measures" mechanism,
+                                   reusing evaluateMeasure unmodified
+  sorting.ts                      deterministic bar/line sort, blanks always last
+  visualQuery.ts                  runKpiVisual/runBarVisual/runLineVisual/
+                                   runGroupedTableVisual/runScalarTableVisual
+  visualRuntime.ts                 barrel + runTableVisual/runVisualQuery
+                                   dispatchers, runSlicerMembers, buildSlicerFilter
+
+runtime/measure/filterContext.ts   + mergeFilterContexts() — the canonical
+                                     FilterContext combinator the Visual
+                                     Runtime uses to intersect the shared
+                                     notebook/slicer context with a grouped
+                                     Visual's per-member filter
+runtime/notebook/
+  useNotebookVisualContext.ts       the shared, transient NotebookVisualContext
+                                     (Record<slicerCellId, ColumnFilter>, folded
+                                     through mergeFilterContexts) — deliberately
+                                     separate from the Context Explorer's filter
+                                     state
+  notebookRuntime.ts                + createVisualCell/updateVisualCell/
+                                     removeVisualCell, mirroring createTestCell
+
+components/visual/
+  KpiVisual.tsx, TableVisual.tsx, BarVisual.tsx, LineVisual.tsx,
+  SlicerVisual.tsx                  consume only VisualQueryResult/
+                                     KpiQueryResult — never SemanticModel/Dataset
+  VisualRenderer.tsx                 single dispatch point: spec.type ->
+                                      runtime call -> presentation component
+
+components/notebook/
+  visual/VisualFieldsForm.tsx        one field-mapping editor shared by create
+                                      and edit, per visual type
+  AddVisualCellPanel.tsx             creation flow (type -> model -> fields)
+  VisualCellCard.tsx                 title/Edit/Delete + VisualRenderer, with
+                                      the same edit form used to create it
+
+App.tsx                              owns useNotebookVisualContext() and wires
+                                      slicer selections/changes through
+                                      NotebookCell to VisualCellCard
+```
+
+Every number a Visual Cell shows comes from the unmodified Sprint 4
+`evaluateMeasure` — `runtime/visual/*` contains no aggregation function and
+no relationship-propagation algorithm of its own, matching the Sprint 6
+"runtime-truth reuse" precedent. See
+[`docs/VISUAL_CELLS.md`](./docs/VISUAL_CELLS.md) for the full design,
+including the `FilterContext` merge semantics, cardinality limits, blank
+handling, persistence boundaries, and the one learner-visible consequence of
+same-column Slicer + grouped-Visual interaction discovered during manual
+verification.
+
 ## Expression strategy
 
 Do not implement full DAX.

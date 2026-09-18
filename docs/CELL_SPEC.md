@@ -104,7 +104,34 @@ Expected output:
   UI-reconstructed explanation)
 
 ### VisualCell
-Maps fields/measures into a simple visual for validation and understanding.
+Maps fields/measures into a simple visual (KPI/Table/Bar/Line/Slicer) for
+validation and understanding. Backed by a real domain/execution contract
+since Sprint 7 — see [`../docs/VISUAL_CELLS.md`](../docs/VISUAL_CELLS.md).
+
+Contract (`src/domain/notebook.ts`):
+```ts
+interface VisualCell extends BaseNotebookCell {
+  kind: 'visual'
+  modelId: string
+  visual: VisualSpec
+}
+```
+`visual` was removed from `GenericCellKind` and promoted to a fully typed
+cell. Unlike `CalculatedColumnCell`/`MeasureCell` there is no create-time
+validation pass — a `VisualSpec` is authored field-mapping data (like a
+`TestCell`'s `ValidationSpec`), so a `VisualCell` always exists once
+created; a mapping that later goes stale (a deleted measure/column) fails
+safely at render time instead of being blocked from creation.
+
+Expected output:
+- the visual's field mapping (persisted on the cell)
+- for KPI/Table/Bar/Line: a scalar or `VisualQueryResult` produced entirely
+  by `runtime/visual/*` calling the real Sprint 4 `evaluateMeasure` under
+  the shared notebook/slicer `FilterContext` (never persisted — recomputed
+  on every render)
+- for Slicer: real form controls over the column's real distinct values,
+  emitting a canonical `ColumnFilter` into the shared, transient
+  `NotebookVisualContext` (never persisted — resets to "All" on reload)
 
 ### QuestionCell
 Captures conceptual or analytical learner input.

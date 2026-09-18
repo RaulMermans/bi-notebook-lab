@@ -173,16 +173,41 @@ implementation details.
 
 ---
 
-## Phase 7 — Visual Cells
+## Phase 7 — Visual Cells ✅ complete
 
-- table
-- KPI card
-- bar chart
-- line chart
-- field mapping
-- filters/slicers at lesson level
+- `VisualCell`, a real typed notebook cell (promoted out of
+  `GenericCellKind`), owning a `VisualSpec` (Kpi/Table/Bar/Line/Slicer)
+- a Visual Runtime (`runtime/visual/*`) that executes every Visual purely
+  through the existing Sprint 4 `evaluateMeasure` — grouped Visuals
+  (Bar/Line/Table-with-dimension) re-evaluate the configured measure(s)
+  once per distinct dimension member under a merged `FilterContext`, with
+  no second aggregation or relationship-propagation engine
+- `mergeFilterContexts`, the canonical `FilterContext` combinator (different
+  columns AND, same column intersects) that lets a grouped Visual's own
+  per-member filter combine correctly with the shared notebook/slicer
+  context
+- a shared, transient `NotebookVisualContext`: every KPI/Table/Bar/Line
+  reads it, every Slicer writes to it (own filter only — clearing one
+  Slicer never touches another's), multiple Slicers combine with AND
+  semantics, and it always resets to "All" on reload while Visual field
+  mappings persist
+- table/bar/line/KPI/slicer creation and editing UI (`AddVisualCellPanel`,
+  `VisualCellCard`, one shared `VisualFieldsForm` for both), reusing Recharts
+  for Bar/Line and real semantic `<table>`/radio/checkbox markup elsewhere
+- cardinality limits (bar 30 / line 100 / table 100 / slicer 200) with an
+  explicit "Showing top N of M" notice, deterministic sorting (blanks
+  always last), and explicit `(Blank)` dimension members
+- structured `VisualDiagnostic`s (`VISUAL_MEASURE_NOT_FOUND`,
+  `VISUAL_COLUMN_NOT_FOUND`, `VISUAL_FILTER_GRAPH_INVALID`, …) so a deleted
+  measure/column fails a Visual safely — verified manually across
+  KPI/Bar/Line/Table with zero console errors
+- verified end-to-end against the built-in Retail sample (KPI/Bar/Line/Table
+  + Country/Category Slicers), including relationship active/inactive
+  recovery and exact-value agreement with the Sprint 6 Context Explorer
 
 **Exit:** learners can verify model/measure behavior through simple visuals.
+See [`docs/VISUAL_CELLS.md`](./docs/VISUAL_CELLS.md) for implementation
+details.
 
 ---
 

@@ -1,4 +1,5 @@
 import type { ValidationSpec } from './validation'
+import type { VisualSpec } from './visual'
 
 export type CellStatus = 'idle' | 'running' | 'passed' | 'failed'
 
@@ -62,12 +63,28 @@ export interface TestCell extends BaseNotebookCell {
 }
 
 /**
- * Cell kinds not yet backed by a runtime (Phase 6+). Kept as one loose
+ * A visual cell owns visualization configuration only — the actual
+ * `VisualSpec` (field mapping) lives on the cell itself rather than on the
+ * `SemanticModel`, since a visual is notebook output, not a model artifact
+ * (docs/VISUAL_CELLS.md). `modelId` names the model the visual reads from.
+ * There is no "draft" VisualCell distinct from this: an unmapped/invalid
+ * visual still exists as a cell and fails safely at render time (see
+ * `runtime/visual/*` diagnostics) rather than being blocked from creation
+ * the way an invalid expression blocks a MeasureCell.
+ */
+export interface VisualCell extends BaseNotebookCell {
+  kind: 'visual'
+  modelId: string
+  visual: VisualSpec
+}
+
+/**
+ * Cell kinds not yet backed by a runtime (Phase 8+). Kept as one loose
  * shape rather than a fully-typed member per kind until each one gets a
  * real domain/execution contract (AGENTS.md: "New cell types require a
  * domain contract and execution contract first").
  */
-export type GenericCellKind = 'markdown' | 'visual' | 'question'
+export type GenericCellKind = 'markdown' | 'question'
 
 export interface GenericNotebookCell extends BaseNotebookCell {
   kind: GenericCellKind
@@ -76,7 +93,14 @@ export interface GenericNotebookCell extends BaseNotebookCell {
   meta?: Record<string, unknown>
 }
 
-export type NotebookCell = DataCell | ModelCell | CalculatedColumnCell | MeasureCell | TestCell | GenericNotebookCell
+export type NotebookCell =
+  | DataCell
+  | ModelCell
+  | CalculatedColumnCell
+  | MeasureCell
+  | TestCell
+  | VisualCell
+  | GenericNotebookCell
 export type CellKind = NotebookCell['kind']
 
 export interface NotebookDocument {
