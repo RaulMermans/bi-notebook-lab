@@ -4,7 +4,9 @@
  * Sprint 4 (Measures) adds `measure-reference`, `aggregation`,
  * `filter-context` and `relationship-propagation` on top of this same shape
  * rather than a parallel trace type — see docs/MEASURES.md and
- * docs/FILTER_CONTEXT.md. (`calculate` is deferred with CALCULATE itself.)
+ * docs/FILTER_CONTEXT.md. Sprint 8 (CALCULATE) adds `calculate`,
+ * `filter-modifier`, `boolean-filter`, `table-filter` and `remove-filters` —
+ * see docs/CALCULATE.md "Execution trace".
  */
 export type TraceNodeKind =
   | 'literal'
@@ -17,6 +19,11 @@ export type TraceNodeKind =
   | 'aggregation'
   | 'filter-context'
   | 'relationship-propagation'
+  | 'calculate'
+  | 'filter-modifier'
+  | 'boolean-filter'
+  | 'table-filter'
+  | 'remove-filters'
 
 export interface ExecutionTraceNode {
   kind: TraceNodeKind

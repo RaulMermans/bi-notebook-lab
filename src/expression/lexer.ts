@@ -12,6 +12,15 @@ export type TokenType =
   | '-'
   | '*'
   | '/'
+  // Sprint 8 (CALCULATE) — comparison and logical operators, see docs/CALCULATE.md.
+  | '='
+  | '<>'
+  | '>'
+  | '>='
+  | '<'
+  | '<='
+  | '&&'
+  | '||'
   | 'eof'
 
 export interface Token {
@@ -61,6 +70,55 @@ export function tokenize(source: string): Token[] {
       tokens.push({ type: ch as TokenType, text: ch, span: { start: i, end: i + 1 } })
       i += 1
       continue
+    }
+
+    if (ch === '=') {
+      tokens.push({ type: '=', text: '=', span: { start: i, end: i + 1 } })
+      i += 1
+      continue
+    }
+
+    if (ch === '<') {
+      if (source[i + 1] === '>') {
+        tokens.push({ type: '<>', text: '<>', span: { start: i, end: i + 2 } })
+        i += 2
+      } else if (source[i + 1] === '=') {
+        tokens.push({ type: '<=', text: '<=', span: { start: i, end: i + 2 } })
+        i += 2
+      } else {
+        tokens.push({ type: '<', text: '<', span: { start: i, end: i + 1 } })
+        i += 1
+      }
+      continue
+    }
+
+    if (ch === '>') {
+      if (source[i + 1] === '=') {
+        tokens.push({ type: '>=', text: '>=', span: { start: i, end: i + 2 } })
+        i += 2
+      } else {
+        tokens.push({ type: '>', text: '>', span: { start: i, end: i + 1 } })
+        i += 1
+      }
+      continue
+    }
+
+    if (ch === '&') {
+      if (source[i + 1] === '&') {
+        tokens.push({ type: '&&', text: '&&', span: { start: i, end: i + 2 } })
+        i += 2
+        continue
+      }
+      throw new LexError('Unexpected "&" — did you mean "&&"?', { start: i, end: i + 1 })
+    }
+
+    if (ch === '|') {
+      if (source[i + 1] === '|') {
+        tokens.push({ type: '||', text: '||', span: { start: i, end: i + 2 } })
+        i += 2
+        continue
+      }
+      throw new LexError('Unexpected "|" — did you mean "||"?', { start: i, end: i + 1 })
     }
 
     if (ch === '[') {

@@ -134,7 +134,30 @@ const RELATED_MESSAGES: Record<RelatedFailureCode, (current: string, target: str
     `More than one active relationship connects "${current}" to "${target}", so RELATED doesn't know which one to use.`,
 }
 
+/**
+ * Sprint 8's CALCULATE is bound in **measure context only** — see
+ * `measureBinder.ts`'s `bindCalculate`. Using it (or a CALCULATE filter
+ * modifier) inside a calculated column would require row-context ->
+ * filter-context transition, which sprint brief §34 explicitly defers rather
+ * than implement a "fake partial" version of. Reported with a dedicated code
+ * so the message is precise instead of the generic "only RELATED" one below.
+ */
+const CALCULATE_CONTEXT_TRANSITION_FUNCTIONS = new Set(['CALCULATE', 'FILTER', 'REMOVEFILTERS', 'ALL'])
+
 function bindFunctionCall(node: FunctionCallNode, ctx: ResolvedBindContext): BindResult {
+  if (CALCULATE_CONTEXT_TRANSITION_FUNCTIONS.has(node.name.toUpperCase())) {
+    return {
+      diagnostics: [
+        diagnostic(
+          'error',
+          'CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED',
+          `"${node.name}" (CALCULATE and its filter modifiers) is only supported in measures, not calculated columns — using it here would require row-context-to-filter-context transition, which Sprint 8 doesn't implement. See docs/CALCULATE.md "Context transition boundary".`,
+          node.nameSpan,
+        ),
+      ],
+    }
+  }
+
   if (node.name.toUpperCase() !== 'RELATED') {
     return {
       diagnostics: [
@@ -258,8 +281,22 @@ function bindNode(node: Expression, ctx: ResolvedBindContext): BindResult {
         ],
       }
 
-    default:
-      return { diagnostics: [] }
+    // Sprint 8 added `=`/`<>`/`>`/`>=`/`<`/`<=`/`&&`/`||` to the shared grammar for CALCULATE's
+    // boolean filter arguments (measure context). Calculated columns stay the unchanged Sprint 3
+    // scalar-arithmetic subset — reported with `UNSUPPORTED_FUNCTION` rather than silently
+    // returning no diagnostics (which would otherwise look like a no-op save).
+    case 'ComparisonExpression':
+    case 'LogicalExpression':
+      return {
+        diagnostics: [
+          diagnostic(
+            'error',
+            'UNSUPPORTED_FUNCTION',
+            'Comparison (=, <>, >, >=, <, <=) and logical (&&, ||) operators are not supported in calculated columns — they are a Sprint 8 measure/CALCULATE feature. See docs/CALCULATE.md.',
+            node.span,
+          ),
+        ],
+      }
   }
 }
 

@@ -211,7 +211,48 @@ details.
 
 ---
 
-## Phase 8 — Learning System
+## Phase 8 — CALCULATE & Filter Context Modification ✅ complete
+
+- comparison (`= <> > >= < <=`) and logical (`&&`/`\|\|`) operators added to
+  the shared expression grammar as a pure addition (new AST node kinds,
+  correct precedence, zero change to existing arithmetic parsing) — no
+  CALCULATE-specific parser grammar
+- `CALCULATE(expression, filter1, filter2, ...)` in measure context:
+  boolean filter arguments, `REMOVEFILTERS`/`ALL` as filter modifiers, and
+  `FILTER(Table, predicate)` producing a real row-subset that propagates
+  through relationships via the unmodified Sprint 4 propagation loop
+- a dedicated context-modification layer (`contextModifier.ts`) with
+  **replacement** semantics on the same column — deliberately separate from
+  Sprint 7's intersection-based `mergeFilterContexts` — so a same-column
+  `CALCULATE` filter genuinely overrides the incoming context (`Spain
+  Revenue` still shows Spain under an external France slicer) while
+  unrelated filters on other columns/tables keep applying
+- a context-safe, per-`CALCULATE`-scope measure-reference cache, so a
+  measure evaluated under two different contexts in the same evaluation
+  never returns the wrong context's cached value
+- nested `CALCULATE` composes naturally (it's just another bound expression
+  node); `CALCULATE` inside a calculated column is rejected with a
+  dedicated, documented `CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED`
+  diagnostic rather than a fake partial implementation
+- five new execution-trace node kinds rendered through the *existing*
+  generic trace-tree component with no UI changes; the Context Explorer
+  surfaces a top-level `CALCULATE` measure's internal modification instead
+  of the external filter context, distinctly (never hidden)
+- zero visual-specific or validation-specific `CALCULATE` code: every
+  `KPI`/`Table`/`Bar`/`Line`/`Slicer` and the numeric-result validation rule
+  picked it up automatically through the unmodified `evaluateMeasure`
+- verified end-to-end against the built-in Retail sample (`Spain Revenue`,
+  `Revenue All Countries`, `Revenue % All Countries`, `All Product Revenue`,
+  a `FILTER` measure over a real `Products[UnitPrice]` column)
+
+**Exit:** learners can manipulate filter context deliberately, the single
+most important conceptual step toward real Power BI Desktop proficiency. See
+[`docs/CALCULATE.md`](./docs/CALCULATE.md) for implementation details,
+architecture, and known DAX compatibility limitations.
+
+---
+
+## Phase 9 — Learning System
 
 - lesson catalog
 - difficulty levels
@@ -225,7 +266,7 @@ details.
 
 ---
 
-## Phase 9 — Authoring
+## Phase 10 — Authoring
 
 - lesson author schema
 - exercise builder
@@ -239,7 +280,10 @@ details.
 
 ## Later, only if validated
 
-- richer DAX subset
+- advanced DAX — iterators (`SUMX`/`AVERAGEX`/…), `VALUES`/`DISTINCT`/
+  `SELECTEDVALUE`, `IF`/`SWITCH`, richer table expressions (recommended
+  Sprint 9 — see [`docs/CALCULATE.md`](./docs/CALCULATE.md) "Known DAX
+  compatibility limitations")
 - custom datasets
 - shareable notebooks
 - desktop wrapper

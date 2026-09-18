@@ -1,4 +1,4 @@
-# Visual Cells (Sprint 7)
+# Visual Cells (Sprint 7 + Sprint 8)
 
 Sprint 7 completes the MVP learning loop by adding a bounded visualization
 layer on top of the Sprint 2–6 semantic model / measure / filter-context
@@ -6,6 +6,15 @@ runtime. This document covers the `VisualCell` domain contract, the
 `VisualSpec` union, the Visual Runtime's execution semantics, `FilterContext`
 merge behavior, the shared slicer context, persistence, performance, and
 known limitations.
+
+**Sprint 8 update:** every Visual automatically supports `CALCULATE`
+measures — a KPI on `Spain Revenue` still shows Spain under a France
+Slicer (same-column replacement happens one layer down, inside
+`evaluateMeasure`, invisible to `mergeFilterContexts`), and a grouped Bar/
+Table correctly combines its own per-member filter with a `CALCULATE`
+measure's internal context. **Zero lines changed in `runtime/visual/*`** —
+see [`CALCULATE.md`](./CALCULATE.md) "Visual Cells integration" and
+`tests/runtime/visual/calculateVisual.test.ts`.
 
 ## Product boundary
 

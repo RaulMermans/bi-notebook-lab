@@ -21,7 +21,7 @@ function collectFunctionNames(expr: Expression, names: Set<string>): void {
     return
   }
   if (expr.kind === 'UnaryExpression') return collectFunctionNames(expr.operand, names)
-  if (expr.kind === 'BinaryExpression') {
+  if (expr.kind === 'BinaryExpression' || expr.kind === 'ComparisonExpression' || expr.kind === 'LogicalExpression') {
     collectFunctionNames(expr.left, names)
     collectFunctionNames(expr.right, names)
   }
@@ -34,7 +34,7 @@ function collectBracketNames(expr: Expression, names: Set<string>): void {
     return
   }
   if (expr.kind === 'UnaryExpression') return collectBracketNames(expr.operand, names)
-  if (expr.kind === 'BinaryExpression') {
+  if (expr.kind === 'BinaryExpression' || expr.kind === 'ComparisonExpression' || expr.kind === 'LogicalExpression') {
     collectBracketNames(expr.left, names)
     collectBracketNames(expr.right, names)
     return
@@ -50,7 +50,7 @@ function collectColumnReferences(expr: Expression, refs: { table: string | null;
     return
   }
   if (expr.kind === 'UnaryExpression') return collectColumnReferences(expr.operand, refs)
-  if (expr.kind === 'BinaryExpression') {
+  if (expr.kind === 'BinaryExpression' || expr.kind === 'ComparisonExpression' || expr.kind === 'LogicalExpression') {
     collectColumnReferences(expr.left, refs)
     collectColumnReferences(expr.right, refs)
     return

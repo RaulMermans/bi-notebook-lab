@@ -128,6 +128,10 @@ DIVIDE(a, b)                 blank if b is blank/0
 DIVIDE(a, b, alternate)      alternate if b is blank/0
 [Measure Name]               measure reference
 + - * /  unary -  ( )        arithmetic between measures/aggregations
+= <> > >= < <=                comparison (Sprint 8) — also valid as a general scalar result
+&& ||                          logical composition (Sprint 8)
+CALCULATE(expr, filters...)   modifies the filter context (Sprint 8 — see docs/CALCULATE.md)
+FILTER / REMOVEFILTERS / ALL   CALCULATE filter modifiers only (Sprint 8)
 ```
 
 All aggregations restrict themselves to rows visible under the current
@@ -149,6 +153,11 @@ Sprint 4 function whose whole purpose is safe division.
   intuitive-for-beginners behavior and documents the divergence here.
 - `MIN`/`MAX` compare with JS `<`/`>`, which works correctly for numbers and
   ISO-8601 date/datetime strings, but not for arbitrary types.
+
+See [`CALCULATE.md`](./CALCULATE.md) for `CALCULATE`/`FILTER`/
+`REMOVEFILTERS`/`ALL` (Sprint 8) and their own known limitations —
+iterators (`SUMX`/`AVERAGEX`), `VALUES`/`DISTINCT`/`SELECTEDVALUE`,
+`IF`/`SWITCH` and time intelligence remain out of scope.
 
 ## Measure references and dependencies
 
@@ -182,7 +191,13 @@ model state in the first place).
 `measureEvaluator.ts`'s per-evaluation `cache: Map<measureId, NodeResult>`
 means that if two measures both reference `[Total Revenue]`, it's computed
 once per `evaluateMeasure` call and reused — not re-evaluated per
-reference.
+reference. Since Sprint 8, this cache is scoped **per filter-context scope**,
+not per whole `evaluateMeasure` call: a `CALCULATE`-modified scope always
+gets a fresh cache, so `[Total Revenue]` computed under an external context
+is never reused for the same measure evaluated again inside a `CALCULATE`
+with a different context (or vice versa) — see
+[`CALCULATE.md`](./CALCULATE.md) "Measure dependencies and the context-safe
+cache".
 
 ## No RELATED in measures
 

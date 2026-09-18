@@ -1,8 +1,22 @@
-# Context Visualizer (Sprint 6)
+# Context Visualizer (Sprint 6 + Sprint 8)
 
 This document describes the Context Explorer: a reusable surface that makes
 Sprint 4's filter-context/relationship-propagation mechanics visually
 understandable, without reimplementing any of them.
+
+**Sprint 8 update:** for a measure whose top-level expression is `CALCULATE`
+(directly, or through a chain of plain measure references), the Explorer's
+diagram and baseline/current comparison reflect the **internal,
+CALCULATE-modified** context rather than the external one the learner set —
+distinctly surfacing "external vs. internal" filters rather than hiding the
+CALCULATE modification. This required zero changes to `contextAnalysis.ts`,
+`graphAdapter.ts` or any Context Explorer component: it falls out of
+`evaluateMeasure` itself now returning the CALCULATE-modified
+`ResolvedFilterState` for that case (see
+[`CALCULATE.md`](./CALCULATE.md) "Context Explorer integration" for the
+exact, bounded scope of this substitution, and the one small
+`graphAdapter.ts` fallback needed so a `FILTER`-derived reduction still shows
+a consistent state badge).
 
 ## Purpose
 

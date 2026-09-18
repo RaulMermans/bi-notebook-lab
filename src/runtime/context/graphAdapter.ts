@@ -62,6 +62,11 @@ export function buildTableStates(model: SemanticModel, state: ResolvedFilterStat
     const directFilters = directByTable.get(table.id) ?? []
     const incomingPropagation = propagationByManyTable.get(table.id) ?? []
 
+    // A CALCULATE `FILTER`/inequality-derived table selection (Sprint 8) narrows `visibleRows`
+    // without adding a `ColumnFilter`-shaped `directFilters` entry (docs/CALCULATE.md "Known
+    // limitations" — the *why* only shows up in the execution trace, not this summary). Falling
+    // back to 'direct' here keeps the visible/total percentage and the state badge consistent
+    // instead of showing "unfiltered" next to a reduced row count.
     const filterState =
       directFilters.length > 0 && incomingPropagation.length > 0
         ? 'direct+propagated'
@@ -69,7 +74,9 @@ export function buildTableStates(model: SemanticModel, state: ResolvedFilterStat
           ? 'direct'
           : incomingPropagation.length > 0
             ? 'propagated'
-            : 'unfiltered'
+            : visibleRows < totalRows
+              ? 'direct'
+              : 'unfiltered'
 
     return {
       modelTableId: table.id,

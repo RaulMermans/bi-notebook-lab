@@ -1,11 +1,13 @@
-# Expression Engine (Sprint 3 + Sprint 4)
+# Expression Engine (Sprint 3 + Sprint 4 + Sprint 8)
 
 This document describes the reusable expression system introduced in
-Sprint 3 to execute calculated-column formulas, and how Sprint 4
-(Measures) extends it with aggregation and filter-context semantics
-without introducing a second parser. See [`MEASURES.md`](./MEASURES.md)
-and [`FILTER_CONTEXT.md`](./FILTER_CONTEXT.md) for the Sprint 4-specific
-runtime built on top of this engine.
+Sprint 3 to execute calculated-column formulas, how Sprint 4 (Measures)
+extends it with aggregation and filter-context semantics, and how Sprint 8
+(`CALCULATE`) extends the *same* grammar a second time with comparison/
+logical operators — all without introducing a second parser. See
+[`MEASURES.md`](./MEASURES.md), [`FILTER_CONTEXT.md`](./FILTER_CONTEXT.md)
+and [`CALCULATE.md`](./CALCULATE.md) for the runtime built on top of this
+engine.
 
 ## Pipeline
 
@@ -82,8 +84,16 @@ Sprint 4 adds a **second binding mode for measures**
 lexer/parser/AST, that supports `SUM`/`AVERAGE`/`MIN`/`MAX`/`COUNT`/
 `COUNTROWS`/`DISTINCTCOUNT`/`DIVIDE` and measure references but rejects
 `RELATED` and naked physical columns — see [`MEASURES.md`](./MEASURES.md)
-"Measure binding" for the full rules. `CALCULATE`, `FILTER`, `ALL` and
-time intelligence remain out of scope for both modes.
+"Measure binding" for the full rules.
+
+Sprint 8 adds `CALCULATE`, `FILTER`, `REMOVEFILTERS` and `ALL` to measure
+mode only (comparison/logical operators are also valid as a *general* scalar
+measure result, e.g. `[Total Revenue] > 100`) — see
+[`CALCULATE.md`](./CALCULATE.md) for the full grammar, binding rules and
+context-modification architecture. Using `CALCULATE`/`FILTER`/
+`REMOVEFILTERS`/`ALL` inside a **calculated column** is rejected with
+`CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED` — context transition remains
+out of scope. Time intelligence remains out of scope for both modes.
 
 ## AST (`src/expression/ast.ts`)
 
@@ -95,7 +105,16 @@ Expression =
   | BinaryExpressionNode { operator: '+'|'-'|'*'|'/'; left; right }
   | FunctionCallNode     { name: string; args: Expression[] }
   | TableReferenceNode   { table: string }
+  | ComparisonExpressionNode { operator: '='|'<>'|'>'|'>='|'<'|'<='; left; right }  // Sprint 8
+  | LogicalExpressionNode    { operator: '&&'|'\|\|'; left; right }                  // Sprint 8
 ```
+
+`ComparisonExpressionNode`/`LogicalExpressionNode` are a Sprint 8 addition —
+see [`CALCULATE.md`](./CALCULATE.md) "Operator precedence" for the full
+precedence table (relational binds tighter than equality, which binds
+tighter than `&&`, which binds tighter than `\|\|`). `=` inside an expression
+is always this comparison node, never assignment — measure-name assignment
+stays outside the parser, unchanged.
 
 Every node carries a `span: { start, end }` (character offsets into the
 source string), and `ColumnReferenceNode` additionally carries
@@ -207,6 +226,7 @@ for every row. An unmatched foreign key returns `null` (blank) with
 interface ExecutionTraceNode {
   kind: 'literal' | 'column-read' | 'unary-operation' | 'binary-operation' | 'related-lookup' | 'result'
       | 'measure-reference' | 'aggregation' | 'filter-context' | 'relationship-propagation'
+      | 'calculate' | 'filter-modifier' | 'boolean-filter' | 'table-filter' | 'remove-filters'
   label: string
   value?: unknown
   children?: ExecutionTraceNode[]
@@ -217,10 +237,13 @@ interface ExecutionTraceNode {
 This is real runtime output — the row-context visualizer (calculated
 columns) and the measure trace visualizer both render exactly this tree
 through a shared `TraceNodeView` component, never a reconstructed
-explanation string. The last four kinds are Sprint 4 additions on the
-same shape — see [`FILTER_CONTEXT.md`](./FILTER_CONTEXT.md) "Execution
-trace" for what each one carries. (`calculate` is deferred along with
-`CALCULATE` itself.)
+explanation string. `measure-reference`/`aggregation`/`filter-context`/
+`relationship-propagation` are Sprint 4 additions — see
+[`FILTER_CONTEXT.md`](./FILTER_CONTEXT.md) "Execution trace" for what each
+one carries. `calculate`/`filter-modifier`/`boolean-filter`/`table-filter`/
+`remove-filters` are Sprint 8 additions — see [`CALCULATE.md`](./CALCULATE.md)
+"Execution trace" — rendered through the same `TraceNodeView` with no
+component changes.
 
 ## Diagnostics (`src/expression/diagnostics.ts`)
 
@@ -235,6 +258,11 @@ type ExpressionDiagnosticCode =
   | 'BARE_TABLE_REFERENCE' | 'UNKNOWN_MEASURE' | 'DUPLICATE_MEASURE' | 'MEASURE_DEPENDENCY_CYCLE'
   | 'COLUMN_REQUIRES_AGGREGATION' | 'INVALID_AGGREGATION_ARGUMENT' | 'NON_NUMERIC_AGGREGATION'
   | 'FILTER_GRAPH_INVALID' | 'INVALID_FILTER_VALUE' | 'RELATED_REQUIRES_ROW_CONTEXT'
+  // Sprint 8 (CALCULATE) — see docs/CALCULATE.md
+  | 'INVALID_CALCULATE_ARITY' | 'CALCULATE_INVALID_FILTER_ARGUMENT'
+  | 'BOOLEAN_FILTER_MULTIPLE_TABLES' | 'BOOLEAN_FILTER_MEASURE_REFERENCE' | 'BOOLEAN_FILTER_NESTED_CALCULATE'
+  | 'FILTER_PREDICATE_NOT_BOOLEAN' | 'FILTER_ROW_CONTEXT_VIOLATION'
+  | 'INVALID_REMOVEFILTERS_ARGUMENT' | 'INVALID_ALL_ARGUMENT' | 'CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED'
 ```
 
 `UNSUPPORTED_FUNCTION` (calling anything other than `RELATED`, or an
@@ -258,9 +286,11 @@ piece of the measure's expression.
 
 ## Known incompatibilities with full DAX
 
-- No `CALCULATE`/`FILTER`/`ALL`/`REMOVEFILTERS`, no context transition, no
-  time intelligence — deferred past Sprint 4 (see `MEASURES.md`/
-  `FILTER_CONTEXT.md` "Known limitations").
+- `CALCULATE`/`FILTER`/`ALL`/`REMOVEFILTERS` work in measure context only —
+  no context transition (using them in a calculated column is rejected, not
+  silently ignored). No time intelligence, no iterators (`SUMX`, etc.). See
+  [`CALCULATE.md`](./CALCULATE.md) "Known DAX compatibility limitations" for
+  the full, current list.
 - Blank/`BLANK()` coercion rules are simplified (see above).
 - Table/column name matching is case-insensitive; real DAX is
   case-insensitive for identifiers too, but the exact edge cases (e.g.

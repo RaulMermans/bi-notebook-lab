@@ -96,6 +96,81 @@ describe('semanticValidation', () => {
     expect(result.status).toBe('failed')
   })
 
+  it('recognizes CALCULATE, FILTER, REMOVEFILTERS and ALL for uses-function (sprint brief §54)', () => {
+    const { model, datasets, salesTableId } = buildRetailModel()
+    const revenue = createMeasure(model, datasets, { homeModelTableId: salesTableId, name: 'Total Revenue', expression: 'SUM(Sales[Revenue])' })
+    const spainRevenue = createMeasure(revenue.model, datasets, {
+      homeModelTableId: salesTableId,
+      name: 'Spain Revenue',
+      expression: 'CALCULATE([Total Revenue], Customers[Country] = "Spain")',
+    })
+    expect(spainRevenue.diagnostics).toEqual([])
+
+    for (const functionName of ['CALCULATE']) {
+      const result = evaluateExpressionSemanticRule(
+        {
+          id: 's', type: 'expression-semantics', title: `Uses ${functionName}`, points: 5,
+          target: { kind: 'measure', measure: { name: 'Spain Revenue' } },
+          assertions: [{ kind: 'uses-function', functionName }],
+        },
+        spainRevenue.model,
+        datasets,
+      )
+      expect(result.status).toBe('passed')
+    }
+
+    const filterMeasure = createMeasure(spainRevenue.model, datasets, {
+      homeModelTableId: salesTableId,
+      name: 'Premium Product Revenue',
+      expression: 'CALCULATE([Total Revenue], FILTER(Products, Products[UnitPrice] > 100))',
+    })
+    expect(filterMeasure.diagnostics).toEqual([])
+    const filterResult = evaluateExpressionSemanticRule(
+      {
+        id: 's', type: 'expression-semantics', title: 'Uses FILTER', points: 5,
+        target: { kind: 'measure', measure: { name: 'Premium Product Revenue' } },
+        assertions: [{ kind: 'uses-function', functionName: 'FILTER' }],
+      },
+      filterMeasure.model,
+      datasets,
+    )
+    expect(filterResult.status).toBe('passed')
+
+    const removeFiltersMeasure = createMeasure(filterMeasure.model, datasets, {
+      homeModelTableId: salesTableId,
+      name: 'Revenue All Countries',
+      expression: 'CALCULATE([Total Revenue], REMOVEFILTERS(Customers[Country]))',
+    })
+    expect(removeFiltersMeasure.diagnostics).toEqual([])
+    const removeFiltersResult = evaluateExpressionSemanticRule(
+      {
+        id: 's', type: 'expression-semantics', title: 'Uses REMOVEFILTERS', points: 5,
+        target: { kind: 'measure', measure: { name: 'Revenue All Countries' } },
+        assertions: [{ kind: 'uses-function', functionName: 'REMOVEFILTERS' }],
+      },
+      removeFiltersMeasure.model,
+      datasets,
+    )
+    expect(removeFiltersResult.status).toBe('passed')
+
+    const allMeasure = createMeasure(removeFiltersMeasure.model, datasets, {
+      homeModelTableId: salesTableId,
+      name: 'All Product Revenue',
+      expression: 'CALCULATE([Total Revenue], ALL(Products))',
+    })
+    expect(allMeasure.diagnostics).toEqual([])
+    const allResult = evaluateExpressionSemanticRule(
+      {
+        id: 's', type: 'expression-semantics', title: 'Uses ALL', points: 5,
+        target: { kind: 'measure', measure: { name: 'All Product Revenue' } },
+        assertions: [{ kind: 'uses-function', functionName: 'ALL' }],
+      },
+      allMeasure.model,
+      datasets,
+    )
+    expect(allResult.status).toBe('passed')
+  })
+
   it('passes not-constant-only for a real aggregation', () => {
     const { model, datasets, salesTableId } = buildRetailModel()
     const revenue = createMeasure(model, datasets, { homeModelTableId: salesTableId, name: 'Total Revenue', expression: 'SUM(Sales[Revenue])' })

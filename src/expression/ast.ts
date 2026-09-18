@@ -78,6 +78,33 @@ export interface FunctionCallNode {
 }
 
 /**
+ * Sprint 8 (CALCULATE) addition. `=` inside an expression is always a
+ * comparison, never assignment — measure-name assignment (`Spain Revenue =`)
+ * is UI/domain metadata handled outside the parser (see docs/CALCULATE.md
+ * "`=` is comparison, not assignment").
+ */
+export type ComparisonOperator = '=' | '<>' | '>' | '>=' | '<' | '<='
+
+export interface ComparisonExpressionNode {
+  kind: 'ComparisonExpression'
+  operator: ComparisonOperator
+  left: Expression
+  right: Expression
+  span: SourceSpan
+}
+
+/** Sprint 8 (CALCULATE) addition — `&&`/`||` boolean composition, e.g. inside `FILTER`'s predicate. */
+export type LogicalOperator = '&&' | '||'
+
+export interface LogicalExpressionNode {
+  kind: 'LogicalExpression'
+  operator: LogicalOperator
+  left: Expression
+  right: Expression
+  span: SourceSpan
+}
+
+/**
  * A bare table name with no `[...]`/`(...)` following it, e.g. the `Sales`
  * in `COUNTROWS(Sales)`. Sprint 3 had no such node — every identifier had to
  * be followed by a bracket or a parenthesis. Sprint 4 measures need it for
@@ -99,3 +126,5 @@ export type Expression =
   | BinaryExpressionNode
   | FunctionCallNode
   | TableReferenceNode
+  | ComparisonExpressionNode
+  | LogicalExpressionNode

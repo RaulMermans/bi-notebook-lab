@@ -233,42 +233,65 @@ function buildTrace(
 }
 
 /**
- * Resolves a `FilterContext` into concrete row selections per model table:
- * direct filters first, then fixed-point propagation through active `1 → *`
- * relationships. Fails closed with `FILTER_GRAPH_INVALID` if the model's own
- * relationship graph is already invalid (`ACTIVE_CYCLE`/`AMBIGUOUS_PATH`) —
- * see docs/FILTER_CONTEXT.md "Invalid filter graphs".
+ * Checks the model's own relationship graph once — validity is a property of
+ * `model` alone, independent of any `FilterContext`, so a CALCULATE-heavy
+ * evaluation (which may resolve many nested contexts against the *same*
+ * model) only needs to run this once per `evaluateMeasure` call rather than
+ * once per nested resolution (sprint brief §68 "avoid obvious repeated
+ * recomputation"). See `resolveFilterContext` (the checked, public entry
+ * point) and `resolveFilterContextUnchecked` (used internally once validity
+ * is already known).
  */
-export function resolveFilterContext(
+export function checkFilterGraphValidity(model: SemanticModel, datasets: Record<string, Dataset>): ExpressionDiagnostic[] {
+  const modelDiagnostics = validateModel(model, datasets)
+  const graphIssues = modelDiagnostics.filter((d) => d.code === 'ACTIVE_CYCLE' || d.code === 'AMBIGUOUS_PATH')
+  if (graphIssues.length === 0) return []
+  return [
+    diagnostic(
+      'error',
+      'FILTER_GRAPH_INVALID',
+      `This model's relationship graph is invalid (${graphIssues.map((d) => d.code).join(', ')}), so measures can't be evaluated deterministically. Fix the model diagnostics first.`,
+      undefined,
+      { modelDiagnostics: graphIssues },
+    ),
+  ]
+}
+
+function invalidFilterState(diagnostics: ExpressionDiagnostic[]): ResolvedFilterState {
+  return {
+    valid: false,
+    diagnostics,
+    rowSelections: new Map(),
+    tableSummaries: [],
+    directFilterSummaries: [],
+    propagationSteps: [],
+    trace: { kind: 'filter-context', label: 'Filter graph invalid', metadata: { codes: diagnostics.map((d) => d.code) } },
+  }
+}
+
+/**
+ * Resolves a `FilterContext` into concrete row selections per model table,
+ * *assuming* the model's relationship graph has already been checked valid
+ * (`checkFilterGraphValidity`) — used by CALCULATE's nested resolutions
+ * within one `evaluateMeasure` call. `tableSelections`, when given, seeds a
+ * table's *starting* row selection (instead of the `'all'` default) before
+ * direct filters and propagation run — this is how a `FILTER(Table,
+ * predicate)`-derived row subset (sprint brief §21) both AND-combines with
+ * any ordinary `ColumnFilter` landing on the same table and propagates
+ * through active relationships exactly like a direct filter would, with no
+ * changes to `propagate()` itself.
+ */
+export function resolveFilterContextUnchecked(
   model: SemanticModel,
   datasets: Record<string, Dataset>,
   filterContext: FilterContext,
+  tableSelections?: Map<string, Set<number>>,
 ): ResolvedFilterState {
-  const modelDiagnostics = validateModel(model, datasets)
-  const graphIssues = modelDiagnostics.filter((d) => d.code === 'ACTIVE_CYCLE' || d.code === 'AMBIGUOUS_PATH')
-
-  if (graphIssues.length > 0) {
-    const diagnostics: ExpressionDiagnostic[] = [
-      diagnostic(
-        'error',
-        'FILTER_GRAPH_INVALID',
-        `This model's relationship graph is invalid (${graphIssues.map((d) => d.code).join(', ')}), so measures can't be evaluated deterministically. Fix the model diagnostics first.`,
-        undefined,
-        { modelDiagnostics: graphIssues },
-      ),
-    ]
-    return {
-      valid: false,
-      diagnostics,
-      rowSelections: new Map(),
-      tableSummaries: [],
-      directFilterSummaries: [],
-      propagationSteps: [],
-      trace: { kind: 'filter-context', label: 'Filter graph invalid', metadata: { codes: graphIssues.map((d) => d.code) } },
-    }
+  const rowSelections = new Map<string, RowSelection>()
+  if (tableSelections) {
+    for (const [modelTableId, indexes] of tableSelections) rowSelections.set(modelTableId, indexes)
   }
 
-  const rowSelections = new Map<string, RowSelection>()
   const directFilterSummaries: DirectFilterSummary[] = []
   applyDirectFilters(model, datasets, filterContext.filters, rowSelections, directFilterSummaries)
 
@@ -296,6 +319,24 @@ export function resolveFilterContext(
     propagationSteps,
     trace: buildTrace(filterContext, directFilterSummaries, propagationSteps, tableSummaries),
   }
+}
+
+/**
+ * Resolves a `FilterContext` into concrete row selections per model table:
+ * direct filters first, then fixed-point propagation through active `1 → *`
+ * relationships. Fails closed with `FILTER_GRAPH_INVALID` if the model's own
+ * relationship graph is already invalid (`ACTIVE_CYCLE`/`AMBIGUOUS_PATH`) —
+ * see docs/FILTER_CONTEXT.md "Invalid filter graphs".
+ */
+export function resolveFilterContext(
+  model: SemanticModel,
+  datasets: Record<string, Dataset>,
+  filterContext: FilterContext,
+  tableSelections?: Map<string, Set<number>>,
+): ResolvedFilterState {
+  const graphDiagnostics = checkFilterGraphValidity(model, datasets)
+  if (graphDiagnostics.length > 0) return invalidFilterState(graphDiagnostics)
+  return resolveFilterContextUnchecked(model, datasets, filterContext, tableSelections)
 }
 
 export function visibleRowIndices(state: ResolvedFilterState, modelTableId: string, totalRows: number): number[] {

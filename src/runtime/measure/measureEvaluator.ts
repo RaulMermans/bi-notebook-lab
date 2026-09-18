@@ -5,9 +5,24 @@ import type { BinaryOperator } from '../../expression/ast'
 import { bindMeasureExpression, type BoundMeasureExpression } from '../../expression/measureBinder'
 import { parseExpression } from '../../expression/parser'
 import type { ExecutionTraceNode } from '../../expression/trace'
+import { compareScalarValues } from './booleanFilter'
 import { computeAggregation, computeCountRows } from './aggregation'
+import {
+  applyFilterModifier,
+  buildEffectiveContext,
+  cloneEffectiveContext,
+  toFilterContext,
+  toTableSelectionIndexes,
+  type EffectiveContext,
+} from './contextModifier'
 import { EMPTY_FILTER_CONTEXT, type FilterContext } from './filterContext'
-import { resolveFilterContext, selectionSize, visibleRowIndices, type ResolvedFilterState } from './filterPropagation'
+import {
+  resolveFilterContext,
+  resolveFilterContextUnchecked,
+  selectionSize,
+  visibleRowIndices,
+  type ResolvedFilterState,
+} from './filterPropagation'
 import { getLogicalColumnValues, type LogicalColumnRef } from './logicalColumn'
 import { resolveTableRef } from '../model/modelRuntime'
 
@@ -24,15 +39,40 @@ interface NodeResult {
   value: unknown
   trace: ExecutionTraceNode
   diagnostics: ExpressionDiagnostic[]
+  /**
+   * Set only by a `Calculate` node (and passed through by `evaluateMeasureById`
+   * for a measure whose *top-level* expression is a `CALCULATE`): the modified
+   * `ResolvedFilterState` CALCULATE actually evaluated under. `evaluateMeasure`
+   * surfaces this instead of the outer/external filter state so the Context
+   * Explorer diagram reflects "Spain", not the external "France" slicer, for a
+   * measure like `Spain Revenue` (docs/CALCULATE.md "Context Explorer
+   * integration"). Left undefined for every other node kind — a bounded,
+   * documented limitation for expressions that mix several different
+   * CALCULATE contexts (e.g. `[Spain Revenue] - [France Revenue]`), where no
+   * single filter state could represent the whole result anyway.
+   */
+  effectiveFilterState?: ResolvedFilterState
 }
 
 interface MeasureEvalContext {
   model: SemanticModel
   datasets: Record<string, Dataset>
   filterState: ResolvedFilterState
-  /** Per-evaluation cache so a measure referenced by several other measures is only computed once (docs/MEASURES.md "Measure reference trace"). */
+  /** The context-modification bookkeeping (`ColumnFilter`s + FILTER-derived table selections) that produced `filterState` — CALCULATE reads this as its "incoming" context to modify (docs/CALCULATE.md). */
+  effectiveContext: EffectiveContext
+  /**
+   * Per-evaluation-*scope* cache so a measure referenced several times under
+   * the *same* filter context is only computed once (docs/MEASURES.md
+   * "Measure reference trace"). CALCULATE always evaluates its inner
+   * expression with a **fresh** cache (never inherited from the outer scope)
+   * — reusing a value computed under a different `FilterContext` here would
+   * be the exact bug sprint brief §32 calls out (e.g. a France-context
+   * `[Total Revenue]` must never leak into a CALCULATE'd Spain context).
+   */
   cache: Map<string, NodeResult>
+  /** Shared across every nested scope of one `evaluateMeasure` call — cycle detection is structural, not context-dependent. */
   visiting: Set<string>
+  /** Shared across every nested scope — a column's raw values don't depend on filter context, only which row *indexes* are visible does. */
   columnValuesCache: Map<string, unknown[]>
 }
 
@@ -114,6 +154,7 @@ function evaluateMeasureById(measureId: string, ctx: MeasureEvalContext): NodeRe
         value: evaluated.value,
         trace: { kind: 'measure-reference', label: `[${measure.name}]`, value: evaluated.value, children: [evaluated.trace] },
         diagnostics: evaluated.diagnostics,
+        effectiveFilterState: evaluated.effectiveFilterState,
       }
     }
   }
@@ -185,6 +226,57 @@ function evaluateNode(node: BoundMeasureExpression, ctx: MeasureEvalContext): No
       return { value: result.value, diagnostics: [], trace: result.trace }
     }
 
+    case 'Comparison': {
+      const left = evaluateNode(node.left, ctx)
+      const right = evaluateNode(node.right, ctx)
+      const diagnostics = [...left.diagnostics, ...right.diagnostics]
+      const value = diagnostics.length === 0 ? compareScalarValues(node.operator, left.value, right.value) : null
+      return {
+        value,
+        diagnostics,
+        trace: {
+          kind: 'binary-operation',
+          label: `${formatValue(left.value)} ${node.operator} ${formatValue(right.value)}`,
+          value,
+          children: [left.trace, right.trace],
+        },
+      }
+    }
+
+    case 'Logical': {
+      const left = evaluateNode(node.left, ctx)
+      // Short-circuit (sprint brief §11): only evaluate `right` when its value could change the result.
+      if (left.diagnostics.length === 0) {
+        if (node.operator === '&&' && left.value === false) {
+          return { value: false, diagnostics: [], trace: { kind: 'binary-operation', label: `${formatValue(left.value)} && ⋯`, value: false, children: [left.trace] } }
+        }
+        if (node.operator === '||' && left.value === true) {
+          return { value: true, diagnostics: [], trace: { kind: 'binary-operation', label: `${formatValue(left.value)} || ⋯`, value: true, children: [left.trace] } }
+        }
+      }
+      const right = evaluateNode(node.right, ctx)
+      const diagnostics = [...left.diagnostics, ...right.diagnostics]
+      const value =
+        diagnostics.length === 0
+          ? node.operator === '&&'
+            ? Boolean(left.value) && Boolean(right.value)
+            : Boolean(left.value) || Boolean(right.value)
+          : null
+      return {
+        value,
+        diagnostics,
+        trace: {
+          kind: 'binary-operation',
+          label: `${formatValue(left.value)} ${node.operator} ${formatValue(right.value)}`,
+          value,
+          children: [left.trace, right.trace],
+        },
+      }
+    }
+
+    case 'Calculate':
+      return evaluateCalculate(node, ctx)
+
     case 'Divide': {
       const numerator = evaluateNode(node.numerator, ctx)
       const denominator = evaluateNode(node.denominator, ctx)
@@ -216,6 +308,84 @@ function evaluateNode(node: BoundMeasureExpression, ctx: MeasureEvalContext): No
   }
 }
 
+/**
+ * Evaluates `CALCULATE(expression, modifiers...)` (docs/CALCULATE.md):
+ *
+ * 1. Clone the enclosing scope's `EffectiveContext` (never mutate it — a
+ *    sibling expression evaluated after this CALCULATE must still see the
+ *    unmodified outer context).
+ * 2. Apply every filter modifier **sequentially**, left to right (sprint
+ *    brief §28 "Modifier Ordering") — a row-scanning modifier (a direct
+ *    inequality, or FILTER) reads row visibility from the *outer* scope's
+ *    already-resolved `filterState`, not from sibling modifiers processed
+ *    earlier in this same call (docs/CALCULATE.md "FILTER and the ambient
+ *    context" — this is what makes a `FILTER` argument automatically
+ *    intersect with whatever the caller already had filtered, sprint brief
+ *    §51, with no separate intersection logic needed).
+ * 3. Resolve the modified context once (`resolveFilterContextUnchecked` — the
+ *    model's relationship graph was already validated once at the top of
+ *    `evaluateMeasure`, sprint brief §68).
+ * 4. Evaluate the inner expression under a **fresh** cache but the *same*
+ *    `visiting`/`columnValuesCache` (see `MeasureEvalContext` doc comment for
+ *    why — sprint brief §32/§64's "context-safe cache" requirement).
+ */
+function evaluateCalculate(
+  node: Extract<BoundMeasureExpression, { kind: 'Calculate' }>,
+  ctx: MeasureEvalContext,
+): NodeResult & { effectiveFilterState: ResolvedFilterState } {
+  const nextEffectiveContext = cloneEffectiveContext(ctx.effectiveContext)
+  const modifierTraces: ExecutionTraceNode[] = []
+
+  for (const modifier of node.modifiers) {
+    const outcome = applyFilterModifier(ctx.model, ctx.datasets, nextEffectiveContext, modifier, ctx.filterState)
+    modifierTraces.push(buildModifierTraceNode(outcome))
+  }
+
+  const innerFilterContext = toFilterContext(nextEffectiveContext)
+  const innerTableSelections = toTableSelectionIndexes(nextEffectiveContext)
+  const innerFilterState = resolveFilterContextUnchecked(ctx.model, ctx.datasets, innerFilterContext, innerTableSelections)
+
+  const calcCtx: MeasureEvalContext = {
+    model: ctx.model,
+    datasets: ctx.datasets,
+    filterState: innerFilterState,
+    effectiveContext: nextEffectiveContext,
+    cache: new Map(),
+    visiting: ctx.visiting,
+    columnValuesCache: ctx.columnValuesCache,
+  }
+
+  const inner = evaluateNode(node.expression, calcCtx)
+
+  const trace: ExecutionTraceNode = {
+    kind: 'calculate',
+    label: node.label,
+    value: inner.value,
+    children: [
+      { kind: 'filter-context', label: 'Incoming context', children: ctx.filterState.trace.children, metadata: ctx.filterState.trace.metadata },
+      ...modifierTraces,
+      { kind: 'filter-context', label: 'Modified context', children: innerFilterState.trace.children, metadata: innerFilterState.trace.metadata },
+      inner.trace,
+    ],
+  }
+
+  return { value: inner.value, diagnostics: inner.diagnostics, trace, effectiveFilterState: innerFilterState }
+}
+
+function buildModifierTraceNode(outcome: ReturnType<typeof applyFilterModifier>): ExecutionTraceNode {
+  if (outcome.kind === 'PredicateFilter') {
+    return {
+      kind: 'table-filter',
+      label: outcome.label,
+      metadata: { tableName: outcome.tableName, inputRows: outcome.inputRows, rowsMatched: outcome.rowsMatched },
+    }
+  }
+  if (outcome.kind === 'ReplaceColumnFilter') {
+    return { kind: 'boolean-filter', label: outcome.label }
+  }
+  return { kind: 'remove-filters', label: outcome.label, metadata: { removed: outcome.removedLabels ?? [] } }
+}
+
 function inferMeasureDataType(value: unknown): DataType | 'unknown' {
   if (value === null || value === undefined) return 'unknown'
   if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'decimal'
@@ -245,18 +415,26 @@ export function evaluateMeasure(
     model,
     datasets,
     filterState,
+    effectiveContext: buildEffectiveContext(filterContext),
     cache: new Map(),
     visiting: new Set(),
     columnValuesCache: new Map(),
   }
 
   const result = evaluateMeasureById(measureId, ctx)
+  // A CALCULATE at the measure's top level evaluated under a *modified*
+  // context — surface that instead of the outer/external one, so downstream
+  // consumers (Context Explorer's diagram, Visual Cells) reflect what the
+  // measure actually computed against (docs/CALCULATE.md "Context Explorer
+  // integration"). See the `effectiveFilterState` doc comment on `NodeResult`
+  // for the bounded scope of this substitution.
+  const effectiveFilterState = result.effectiveFilterState ?? filterState
   return {
     measureId,
     value: result.value,
     dataType: inferMeasureDataType(result.value),
     diagnostics: result.diagnostics,
     trace: result.trace,
-    filterState,
+    filterState: effectiveFilterState,
   }
 }

@@ -164,4 +164,62 @@ describe('measureValidation', () => {
     expect(result.pointsEarned).toBeLessThan(20)
     expect(result.feedback.some((f) => f.code === 'HINT_FILTER_CONTEXT')).toBe(true)
   })
+
+  it('validates a CALCULATE-based measure normally, with no changes required to the numeric-result rule (sprint brief §53)', () => {
+    const { model, datasets, salesTableId, salesDs, customersDs } = buildRetailModel()
+    const totalRevenue = sumRevenue(salesDs.tables[0].rows)
+    const spainIds = new Set(customersDs.tables[0].rows.filter((r) => r.Country === 'Spain').map((r) => r.CustomerID))
+    const spainRevenue = sumRevenue(salesDs.tables[0].rows, (r) => spainIds.has(r.CustomerID))
+
+    let m = createMeasure(model, datasets, { homeModelTableId: salesTableId, name: 'Total Revenue', expression: 'SUM(Sales[Revenue])' })
+    expect(m.diagnostics).toEqual([])
+    m = createMeasure(m.model, datasets, {
+      homeModelTableId: salesTableId,
+      name: 'Spain Revenue',
+      expression: 'CALCULATE([Total Revenue], Customers[Country] = "Spain")',
+    })
+    expect(m.diagnostics).toEqual([])
+
+    // Correctly context-aware: the CALCULATE'd Spain figure must hold regardless of any external filter case.
+    const result = evaluateMeasureResultRule(
+      {
+        id: 'r', type: 'measure-result', title: 'Spain Revenue', points: 20, measure: { name: 'Spain Revenue' },
+        cases: [
+          { id: 'unfiltered', title: 'No external filter', filters: [], expected: spainRevenue },
+          {
+            id: 'france-slicer',
+            title: 'Under an external France slicer (must still show Spain)',
+            filters: [{ column: { table: { tableName: 'Customers' }, columnName: 'Country' }, values: ['France'] }],
+            expected: spainRevenue,
+          },
+        ],
+      },
+      m.model,
+      datasets,
+    )
+
+    expect(result.status).toBe('passed')
+    expect(result.pointsEarned).toBe(20)
+    expect(spainRevenue).toBeLessThan(totalRevenue) // sanity: Spain is a strict, non-trivial subset
+  })
+
+  it('MANDATORY REGRESSION: SUM(Sales[Revenue]) and CALCULATE(SUM(Sales[Revenue])) agree on an unfiltered result (sprint brief §53)', () => {
+    const { model, datasets, salesTableId, salesDs } = buildRetailModel()
+    const totalRevenue = sumRevenue(salesDs.tables[0].rows)
+
+    let m = createMeasure(model, datasets, { homeModelTableId: salesTableId, name: 'Plain Sum', expression: 'SUM(Sales[Revenue])' })
+    expect(m.diagnostics).toEqual([])
+    // CALCULATE with no filter arguments at all — valid per sprint brief §53's literal example.
+    m = createMeasure(m.model, datasets, { homeModelTableId: salesTableId, name: 'Calculated Sum', expression: 'CALCULATE(SUM(Sales[Revenue]))' })
+    expect(m.diagnostics).toEqual([])
+
+    for (const measureName of ['Plain Sum', 'Calculated Sum']) {
+      const result = evaluateMeasureResultRule(
+        { id: 'r', type: 'measure-result', title: measureName, points: 10, measure: { name: measureName }, cases: [{ id: 'all', title: 'All data', filters: [], expected: totalRevenue }] },
+        m.model,
+        datasets,
+      )
+      expect(result.status).toBe('passed')
+    }
+  })
 })

@@ -134,7 +134,7 @@ describe('bindMeasureExpression', () => {
 
   it('rejects an unsupported function with UNSUPPORTED_FUNCTION', () => {
     const { model, datasets } = baseModel()
-    const result = bindMeasure(model, datasets, 'CALCULATE(SUM(Sales[Revenue]))')
+    const result = bindMeasure(model, datasets, 'KEEPFILTERS(SUM(Sales[Revenue]))')
 
     expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'UNSUPPORTED_FUNCTION' })])
   })

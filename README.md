@@ -43,10 +43,11 @@ The first product milestone is not a dashboard builder. It is a **learning runti
 
 Sprint 1 (Data Runtime), Sprint 2 (Semantic Model Runtime), Sprint 3
 (Calculated Columns & Row Context), Sprint 4 (Measures & Filter Context),
-Sprint 5 (Validation Engine), Sprint 6 (Context Visualizer) and Sprint 7
-(Visual Cells) are complete — the full MVP learning loop (import → model →
-calculated columns → measures → filter context → visualize → validate) now
-works end to end. This repository now contains:
+Sprint 5 (Validation Engine), Sprint 6 (Context Visualizer), Sprint 7
+(Visual Cells) and Sprint 8 (`CALCULATE` & Filter Context Modification) are
+complete — the full MVP learning loop (import → model → calculated columns →
+measures → filter context manipulation → visualize → validate) now works end
+to end. This repository now contains:
 
 - product and architecture contracts
 - notebook/cell domain types as a discriminated union, including functional
@@ -102,12 +103,24 @@ works end to end. This repository now contains:
   Slicer emits a canonical column filter into a shared, transient notebook
   filter context that every other Visual reads, so multiple slicers combine
   with AND semantics and clearing one never touches another's filter
+- **CALCULATE** — a measure can now modify its own filter context: boolean
+  filter arguments (`Customers[Country] = "Spain"`, with comparison and
+  logical operators), `REMOVEFILTERS`/`ALL` as filter modifiers, and
+  `FILTER(Table, predicate)` producing a real row-subset that propagates
+  through relationships exactly like a direct filter. Same-column filters
+  **replace** the incoming context (not intersect) — `Spain Revenue` still
+  returns Spain even under an external France slicer — while unrelated
+  filters on other columns/tables keep applying. Nested CALCULATE composes;
+  the execution trace and Context Explorer both surface the internal
+  modification explicitly, and every existing visual/validation surface
+  picked it up automatically through the unmodified `evaluateMeasure`.
 
-`CALCULATE`, `FILTER`, bidirectional/many-to-many relationships and time
-intelligence are **not** implemented yet — see
+Bidirectional/many-to-many relationships, time intelligence, iterators
+(`SUMX`/`AVERAGEX`/etc.), `IF`/`SWITCH`, and full DAX table expressions are
+**not** implemented yet — see [`docs/CALCULATE.md`](./docs/CALCULATE.md),
 [`docs/MEASURES.md`](./docs/MEASURES.md) and
-[`docs/FILTER_CONTEXT.md`](./docs/FILTER_CONTEXT.md) for the Sprint 4
-design and known limitations.
+[`docs/FILTER_CONTEXT.md`](./docs/FILTER_CONTEXT.md) for the exact scope and
+known limitations.
 
 ## Run locally
 
@@ -144,6 +157,14 @@ Use **+ Add Visual** to create a KPI on `Total Revenue`, a Bar chart of
 a country and watch every visual recompute together, matching the exact
 number the Context Explorer shows for the same filter.
 
+Create `Spain Revenue = CALCULATE([Total Revenue], Customers[Country] = "Spain")`,
+put it on a KPI, then set the `Customers[Country]` Slicer to France: `Total
+Revenue` follows the slicer, `Spain Revenue` doesn't — same-column
+replacement, not intersection. Add `Revenue All Countries =
+CALCULATE([Total Revenue], REMOVEFILTERS(Customers[Country]))` to see a
+slicer-proof grand total, and open either measure in the Context Explorer to
+see the internal CALCULATE modification laid out step by step.
+
 ## Core documents
 
 - [`PRODUCT.md`](./PRODUCT.md)
@@ -160,6 +181,7 @@ number the Context Explorer shows for the same filter.
 - [`docs/FILTER_CONTEXT.md`](./docs/FILTER_CONTEXT.md)
 - [`docs/CONTEXT_VISUALIZER.md`](./docs/CONTEXT_VISUALIZER.md)
 - [`docs/VISUAL_CELLS.md`](./docs/VISUAL_CELLS.md)
+- [`docs/CALCULATE.md`](./docs/CALCULATE.md)
 
 ## Scope guardrail
 

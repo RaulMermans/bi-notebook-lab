@@ -1,9 +1,15 @@
-# Filter Context (Sprint 4)
+# Filter Context (Sprint 4 + Sprint 8)
 
 `FilterContext` is the explicit, first-class runtime concept a measure
 evaluates in — the counterpart to `RowContext` for calculated columns
 (see [`MEASURES.md`](./MEASURES.md)). This document covers its
-representation, propagation algorithm, and execution traces.
+representation, propagation algorithm, and execution traces — all
+unchanged in their *public* contract since Sprint 4. Sprint 8's `CALCULATE`
+builds a separate, richer context-*modification* layer on top of these same
+primitives without changing them — see [`CALCULATE.md`](./CALCULATE.md) for
+that layer, including the one propagation-pipeline extension
+(`resolveFilterContextUnchecked`'s optional `tableSelections` seed) that made
+`FILTER(Table, predicate)` possible with no change to `propagate()` itself.
 
 ## Representation (`src/runtime/measure/filterContext.ts`)
 
@@ -38,8 +44,17 @@ are runtime-only — never persisted, always recomputed from the current
 
 ## Resolution pipeline
 
-`resolveFilterContext(model, datasets, filterContext): ResolvedFilterState`
-runs in three steps:
+`resolveFilterContext(model, datasets, filterContext, tableSelections?):
+ResolvedFilterState` runs in three steps. Since Sprint 8, it's a thin
+wrapper: it runs the graph-validity check once, then delegates to
+`resolveFilterContextUnchecked` (steps 2-3) for the actual computation —
+`CALCULATE`'s nested resolutions call the unchecked variant directly, since
+graph validity is a property of `model` alone and was already checked once
+at the top of `evaluateMeasure` (see [`CALCULATE.md`](./CALCULATE.md)
+"performance"). The optional `tableSelections` parameter (new in Sprint 8)
+seeds a table's starting row selection instead of `'all'` — see
+[`CALCULATE.md`](./CALCULATE.md) "FILTER row context and table-selection
+representation".
 
 ### 1. Fail closed on an invalid relationship graph
 
@@ -175,9 +190,14 @@ diagnostic surface, Visual Cells are notebook output — see
 
 ## Known limitations
 
-- Only `equals`/`in` — no comparison operators (`>`, `<`, ranges), no
-  boolean combinations beyond implicit AND, no `CALCULATE`/`FILTER`
-  context modification.
+- `ColumnFilter` itself is still only `equals`/`in` — this contract was
+  deliberately **not** extended for Sprint 8 (sprint brief §47 "do not
+  mutate the persisted/public meaning of `FilterContext` unless necessary").
+  Comparison operators, boolean combinations, and `CALCULATE`/`FILTER`
+  context modification are real and implemented, but live in a *separate*
+  runtime layer (`contextModifier.ts`/`booleanFilter.ts`) that produces a
+  plain `ColumnFilter[]` (plus an internal table-selection seed) by the time
+  it reaches this module — see [`CALCULATE.md`](./CALCULATE.md).
 - Ambiguous or cyclic active relationship graphs fail the *entire*
   evaluation rather than degrading gracefully for the unaffected part of
   the model — intentional per spec, but means one bad relationship can

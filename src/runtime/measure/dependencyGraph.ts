@@ -17,6 +17,8 @@ function collectMeasureReferenceNames(expression: Expression, names: Set<string>
       collectMeasureReferenceNames(expression.operand, names)
       return
     case 'BinaryExpression':
+    case 'ComparisonExpression':
+    case 'LogicalExpression':
       collectMeasureReferenceNames(expression.left, names)
       collectMeasureReferenceNames(expression.right, names)
       return

@@ -201,4 +201,29 @@ describe('bind', () => {
     expect(result.diagnostics).toHaveLength(2)
     expect(result.diagnostics.map((d) => d.code)).toEqual(['UNKNOWN_COLUMN', 'COLUMN_OUTSIDE_ROW_CONTEXT'])
   })
+
+  it('rejects CALCULATE in a calculated column with CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED (sprint brief §34)', () => {
+    const { model, datasets, salesTableId } = baseModel()
+    const parsed = parseExpression('CALCULATE(Sales[Revenue], Sales[Cost] > 0)')
+    const result = bind(parsed.expression!, { model, datasets, currentModelTableId: salesTableId })
+
+    expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED' })])
+  })
+
+  it.each(['FILTER', 'REMOVEFILTERS', 'ALL'])('rejects %s in a calculated column with CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED', (fn) => {
+    const { model, datasets, salesTableId } = baseModel()
+    const parsed = parseExpression(`${fn}(Sales)`)
+    const result = bind(parsed.expression!, { model, datasets, currentModelTableId: salesTableId })
+
+    expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED' })])
+  })
+
+  it('rejects a comparison expression in a calculated column without silently producing an empty result', () => {
+    const { model, datasets, salesTableId } = baseModel()
+    const parsed = parseExpression('Sales[Revenue] > 100')
+    const result = bind(parsed.expression!, { model, datasets, currentModelTableId: salesTableId })
+
+    expect(result.bound).toBeUndefined()
+    expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'UNSUPPORTED_FUNCTION' })])
+  })
 })

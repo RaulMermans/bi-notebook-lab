@@ -1,4 +1,11 @@
-import type { BinaryOperator, ColumnReferenceNode, Expression, SourceSpan } from './ast'
+import type {
+  BinaryOperator,
+  ColumnReferenceNode,
+  ComparisonOperator,
+  Expression,
+  LogicalOperator,
+  SourceSpan,
+} from './ast'
 import { diagnostic, type ExpressionDiagnostic } from './diagnostics'
 import { LexError, tokenize, type Token, type TokenType } from './lexer'
 
@@ -49,7 +56,73 @@ class Parser {
   }
 
   private parseExpression(): Expression {
-    return this.parseAdditive()
+    return this.parseOr()
+  }
+
+  /** Lowest precedence: `||`. See docs/CALCULATE.md "Operator precedence". */
+  private parseOr(): Expression {
+    let left = this.parseAnd()
+    while (this.peek().type === '||') {
+      const operatorToken = this.advance()
+      const right = this.parseAnd()
+      left = {
+        kind: 'LogicalExpression',
+        operator: operatorToken.type as LogicalOperator,
+        left,
+        right,
+        span: { start: left.span.start, end: right.span.end },
+      }
+    }
+    return left
+  }
+
+  private parseAnd(): Expression {
+    let left = this.parseEquality()
+    while (this.peek().type === '&&') {
+      const operatorToken = this.advance()
+      const right = this.parseEquality()
+      left = {
+        kind: 'LogicalExpression',
+        operator: operatorToken.type as LogicalOperator,
+        left,
+        right,
+        span: { start: left.span.start, end: right.span.end },
+      }
+    }
+    return left
+  }
+
+  /** `=`/`<>` bind looser than `< <= > >=`, per docs/CALCULATE.md's precedence table. */
+  private parseEquality(): Expression {
+    let left = this.parseRelational()
+    while (this.peek().type === '=' || this.peek().type === '<>') {
+      const operatorToken = this.advance()
+      const right = this.parseRelational()
+      left = {
+        kind: 'ComparisonExpression',
+        operator: operatorToken.type as ComparisonOperator,
+        left,
+        right,
+        span: { start: left.span.start, end: right.span.end },
+      }
+    }
+    return left
+  }
+
+  private parseRelational(): Expression {
+    let left = this.parseAdditive()
+    while (this.peek().type === '<' || this.peek().type === '<=' || this.peek().type === '>' || this.peek().type === '>=') {
+      const operatorToken = this.advance()
+      const right = this.parseAdditive()
+      left = {
+        kind: 'ComparisonExpression',
+        operator: operatorToken.type as ComparisonOperator,
+        left,
+        right,
+        span: { start: left.span.start, end: right.span.end },
+      }
+    }
+    return left
   }
 
   private parseAdditive(): Expression {

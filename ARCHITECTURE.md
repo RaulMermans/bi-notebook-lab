@@ -388,6 +388,69 @@ handling, persistence boundaries, and the one learner-visible consequence of
 same-column Slicer + grouped-Visual interaction discovered during manual
 verification.
 
+## Sprint 8 implementation (CALCULATE & Filter Context Modification)
+
+```text
+expression/
+  ast.ts                     + ComparisonExpressionNode, LogicalExpressionNode
+                               (=, <>, >, >=, <, <=, &&, ||) — a pure grammar
+                               addition, parsed generically, not CALCULATE-specific
+  lexer.ts, parser.ts         new tokens + precedence chain (parseOr -> parseAnd ->
+                               parseEquality -> parseRelational -> ...existing...)
+  diagnostics.ts              + CALCULATE/FILTER/REMOVEFILTERS/ALL diagnostic codes
+  binder.ts                    rejects CALCULATE/FILTER/REMOVEFILTERS/ALL in a
+                               calculated column with CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED
+                               (context transition is out of scope — docs/CALCULATE.md)
+  measureBinder.ts             + BoundComparison/BoundLogical (general scalar boolean
+                               results) and BoundCalculate { expression, modifiers };
+                               binds CALCULATE's filter arguments into FilterModifier[]
+
+runtime/measure/
+  booleanFilter.ts              NEW — binds/evaluates a CALCULATE/FILTER boolean
+                                 predicate (BoundPredicateNode), independent of the
+                                 general BoundMeasureExpression tree; documented
+                                 blank/cross-type comparison semantics
+  contextModifier.ts            NEW — the context-modification layer: EffectiveContext
+                                 (replaceable ColumnFilters + FILTER-derived
+                                 TableSelections) and applyFilterModifier(), kept
+                                 deliberately separate from filterContext.ts's
+                                 intersection-based mergeFilterContexts()
+  filterPropagation.ts          + resolveFilterContextUnchecked() (skips the
+                                 once-per-evaluateMeasure-call graph-validity check)
+                                 and an optional tableSelections seed so a FILTER-
+                                 derived row subset both AND-combines with ordinary
+                                 ColumnFilters and propagates through the unmodified
+                                 propagate() loop
+  measureEvaluator.ts           + evaluateCalculate(): clones the enclosing
+                                 EffectiveContext, applies filter modifiers
+                                 sequentially, resolves once, evaluates the inner
+                                 expression under a context-safe (fresh-cache)
+                                 nested MeasureEvalContext; evaluateMeasure surfaces
+                                 the CALCULATE-modified filterState for a top-level
+                                 CALCULATE measure (Context Explorer integration)
+  dependencyGraph.ts             traverses the two new AST node kinds too
+
+runtime/validation/semanticValidation.ts   traverses the two new AST node kinds,
+                                            so uses-function recognizes CALCULATE/
+                                            FILTER/REMOVEFILTERS/ALL for free
+runtime/context/graphAdapter.ts             one bounded fallback so a FILTER-derived
+                                             table reduction still shows a consistent
+                                             state badge (docs/CALCULATE.md)
+
+expression/trace.ts             + calculate | filter-modifier | boolean-filter |
+                                 table-filter | remove-filters trace node kinds,
+                                 rendered through the existing generic TraceNodeView
+                                 with no component changes
+```
+
+No new UI components were needed: `MeasureCellCard`, `ContextExplorer` and
+every `Visual` component already consume `evaluateMeasure`'s output
+generically, so a `CALCULATE` measure "just works" everywhere the moment it's
+created — see [`docs/CALCULATE.md`](./docs/CALCULATE.md) for the full
+same-column-replacement semantics, the `FILTER`/`REMOVEFILTERS`/`ALL`
+design, the context-safe caching strategy, nested `CALCULATE`, the
+context-transition boundary, and known DAX compatibility limitations.
+
 ## Expression strategy
 
 Do not implement full DAX.
@@ -403,10 +466,11 @@ modules with aggregation and filter-context semantics (`SUM`,
 `COUNTROWS`, `DISTINCTCOUNT`, `AVERAGE`, `MIN`, `MAX`, `COUNT`, `DIVIDE`,
 measure references) via a second binder and a new measure-evaluation
 runtime, rather than a second expression system — Sprint 3's abstraction
-held up. `CALCULATE` and boolean filter expressions remain deferred (see
-`docs/FILTER_CONTEXT.md` "Known limitations"): Sprint 4 first had to prove
-`FilterContext` + relationship propagation + aggregation work end to end
-on the *same* measure-execution architecture `CALCULATE` will eventually
-plug into.
+held up. Sprint 8 (`CALCULATE`) proves that abstraction held up a second
+time: comparison/logical operators are a pure grammar addition, `CALCULATE`/
+`FILTER`/`REMOVEFILTERS`/`ALL` parse as ordinary function calls with no new
+parser grammar, and CALCULATE's context modification plugs into the exact
+Sprint 4 `FilterContext`/relationship-propagation/aggregation architecture
+predicted back then — see [`docs/CALCULATE.md`](./docs/CALCULATE.md).
 
 The language may look DAX-like, but semantics and supported functions must be explicit.
