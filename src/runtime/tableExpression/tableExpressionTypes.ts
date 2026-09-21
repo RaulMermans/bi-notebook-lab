@@ -48,7 +48,33 @@ export interface BoundDistinctTable {
   span: SourceSpan
 }
 
-export type BoundTableExpression = BoundBaseTable | BoundFilterTable | BoundValuesTable | BoundDistinctTable
+export type TimeIntelligenceOperation = 'same-period-last-year' | 'date-add' | 'previous-month' | 'previous-year' | 'dates-ytd'
+
+/**
+ * Sprint 10's canonical time-intelligence table (sprint brief §14):
+ * `SAMEPERIODLASTYEAR`, `DATEADD`, `PREVIOUSMONTH`, `PREVIOUSYEAR` and
+ * `DATESYTD` all bind to this one variant — never a second "table-returning
+ * function" abstraction — distinguished only by `operation` and its
+ * operation-specific args. `modelTableId`/`dateColumn` always name the
+ * *marked* Date Table column the operation reads/replaces (sprint brief §16);
+ * `DATEADD`'s interval is the only operation with extra args. See
+ * docs/TIME_INTELLIGENCE.md.
+ */
+export interface BoundTimeIntelligenceTable {
+  kind: 'TimeIntelligenceTable'
+  operation: TimeIntelligenceOperation
+  modelTableId: string
+  dateColumn: ColumnRef
+  dateColumnName: string
+  tableName: string
+  label: string
+  span: SourceSpan
+  /** `DATEADD` only. */
+  intervalUnit?: 'YEAR' | 'QUARTER' | 'MONTH' | 'DAY'
+  intervalCount?: number
+}
+
+export type BoundTableExpression = BoundBaseTable | BoundFilterTable | BoundValuesTable | BoundDistinctTable | BoundTimeIntelligenceTable
 
 /**
  * A row of an `EvaluatedTableExpression`, carrying enough lineage to

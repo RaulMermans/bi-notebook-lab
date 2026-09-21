@@ -115,6 +115,8 @@ export default function App() {
                 onCreateRelationship={actions.createRelationship}
                 onRemoveRelationship={actions.removeRelationship}
                 onSetRelationshipActive={actions.setRelationshipActive}
+                onMarkDateTable={actions.markDateTable}
+                onUnmarkDateTable={actions.unmarkDateTable}
                 onUpdateCalculatedColumn={actions.updateCalculatedColumn}
                 onRemoveCalculatedColumnCell={actions.removeCalculatedColumnCell}
                 onUpdateMeasure={actions.updateMeasure}

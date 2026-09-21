@@ -507,9 +507,17 @@ everything or nothing.
   `SELECTEDVALUE`, `IF`/`SWITCH`/`BLANK` are now implemented** — see
   [`docs/ITERATORS.md`](./ITERATORS.md) and
   [`docs/TABLE_EXPRESSIONS.md`](./TABLE_EXPRESSIONS.md) (Sprint 9).
-- **Calculated tables, time intelligence, many-to-many and bidirectional
-  relationships, `ALLSELECTED`/`ALLEXCEPT`/`CALCULATETABLE`/
-  `USERELATIONSHIP`/`CROSSFILTER`, `EARLIER`/`EARLIEST` and nested iterator
-  row-context stacks remain out of scope** — Sprint 10+ territory, not started
-  here (see [`docs/ITERATORS.md`](./ITERATORS.md) "Known limitations" for the
+- **Classic Date Table time intelligence is now implemented** (Sprint 10):
+  `SAMEPERIODLASTYEAR`, `DATEADD`, `PREVIOUSMONTH`, `PREVIOUSYEAR`,
+  `DATESYTD` and `TOTALYTD` — see
+  [`docs/DATE_TABLES.md`](./DATE_TABLES.md) and
+  [`docs/TIME_INTELLIGENCE.md`](./TIME_INTELLIGENCE.md), including the new
+  `DateTableReplace` `FilterModifier` variant this section's "Modifier
+  ordering"/"Table-wide vs. column-scoped replacement" rules extend to.
+- **Calculated tables, calendar-based (Auto date/time) time intelligence,
+  many-to-many and bidirectional relationships,
+  `ALLSELECTED`/`ALLEXCEPT`/`CALCULATETABLE`/`USERELATIONSHIP`/
+  `CROSSFILTER`, `EARLIER`/`EARLIEST` and nested iterator row-context stacks
+  remain out of scope** — Sprint 11+ territory, not started here (see
+  [`docs/ITERATORS.md`](./ITERATORS.md) "Known limitations" for the
   iterator-specific boundaries, e.g. `SUMX(table, CALCULATE(...))`).

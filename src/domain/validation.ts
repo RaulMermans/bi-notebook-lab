@@ -71,6 +71,7 @@ export type ValidationRuleType =
   | 'calculated-column-result'
   | 'measure-result'
   | 'expression-semantics'
+  | 'date-table'
 
 export interface BaseValidationRule {
   id: string
@@ -152,6 +153,19 @@ export interface ExpressionSemanticValidationRule extends BaseValidationRule {
   assertions: ExpressionSemanticAssertion[]
 }
 
+/**
+ * Sprint 10: checks that `table` is marked as a Date Table using exactly
+ * `dateColumn` as its canonical date column, and that the marking is
+ * currently valid (contiguous, unique, non-blank — see
+ * `runtime/dateTable/dateTableRuntime.ts`). See docs/DATE_TABLES.md
+ * "Validation Engine integration".
+ */
+export interface DateTableValidationRule extends BaseValidationRule {
+  type: 'date-table'
+  table: TableSelector
+  dateColumn: ColumnSelector
+}
+
 export type ValidationRule =
   | RelationshipValidationRule
   | ModelHealthValidationRule
@@ -159,6 +173,7 @@ export type ValidationRule =
   | CalculatedColumnResultRule
   | MeasureResultValidationRule
   | ExpressionSemanticValidationRule
+  | DateTableValidationRule
 
 /**
  * The canonical, persisted validation contract — lives on a `TestCell`

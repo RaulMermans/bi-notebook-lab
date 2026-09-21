@@ -430,6 +430,18 @@ model/spec combination ever became slow, the first thing to cache would be
 `resolveFilterContext`'s internal `validateModel` call, which is unchanged
 Sprint 4 code, not something Sprint 5 should special-case around.
 
+## Sprint 10 addendum
+
+A new `date-table` rule type (`DateTableValidationRule`) grades whether a
+table is marked as a Date Table using a specific date column, re-running
+the live `validateDateTableDefinition` check rather than trusting a cached
+result — see [`docs/DATE_TABLES.md`](./DATE_TABLES.md) "Validation Engine
+integration". Grading a time-intelligence measure's *numeric* output (e.g.
+`Revenue LY`, `Revenue YTD`) needs no new rule type at all —
+`MeasureResultValidationRule`'s existing per-case `filters` are already
+sufficient. `ValidationRule`/`ValidationSpec` still need no hydration path
+— they never had one.
+
 ## Known limitations
 
 - Only physical (dataset-schema) columns can appear in a `ColumnSelector` —

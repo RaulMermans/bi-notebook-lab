@@ -109,8 +109,13 @@ reads the current FilterContext, which only measures have). No grammar
 changes were needed for any of this — every new function is an ordinary
 `FunctionCallNode` the existing parser already produces (the one small parser
 addition is `TRUE()`/`FALSE()` as a zero-argument literal call, needed for the
-canonical `SWITCH(TRUE(), ...)` shape). Time intelligence remains out of
-scope for both modes.
+canonical `SWITCH(TRUE(), ...)` shape). `DATEADD`'s bare `YEAR`/`QUARTER`/
+`MONTH`/`DAY` interval keyword (Sprint 10) needed no parser addition either
+— it parses as an ordinary `TableReferenceNode`, the same bare-identifier
+shape a table name already produces. Classic Date Table time intelligence
+is implemented as of Sprint 10 (measure mode only) — see
+[`docs/TIME_INTELLIGENCE.md`](./TIME_INTELLIGENCE.md); calendar-based time
+intelligence remains out of scope for both modes.
 
 ## AST (`src/expression/ast.ts`)
 

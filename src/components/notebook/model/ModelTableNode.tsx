@@ -8,6 +8,9 @@ export interface ModelTableNodeData extends Record<string, unknown> {
   keyColumnIds: Set<string>
   calculatedColumns: CalculatedColumn[]
   measures: Measure[]
+  /** Sprint 10: whether this table is marked as a Date Table (docs/DATE_TABLES.md "Model Canvas"). */
+  isDateTable: boolean
+  dateColumnName?: string
 }
 
 export type ModelTableNodeType = Node<ModelTableNodeData, 'modelTable'>
@@ -23,7 +26,14 @@ export function ModelTableNode({ data }: NodeProps<ModelTableNodeType>) {
   return (
     <div className="model-node">
       <Handle type="target" position={Position.Left} />
-      <div className="model-node__header">{data.tableName}</div>
+      <div className="model-node__header">
+        {data.tableName}
+        {data.isDateTable && (
+          <span className="model-node__date-table-badge" title={data.dateColumnName ? `Date Table · ${data.tableName}[${data.dateColumnName}]` : 'Date Table'}>
+            DATE TABLE
+          </span>
+        )}
+      </div>
       <ul className="model-node__columns">
         {data.columns.map((column) => (
           <li key={column.id} className={data.keyColumnIds.has(column.id) ? 'model-node__column--key' : undefined}>

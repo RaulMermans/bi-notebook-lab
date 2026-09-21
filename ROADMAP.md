@@ -299,6 +299,59 @@ details, architecture, and known DAX compatibility limitations.
 
 ---
 
+## Phase 8.6 — Time Intelligence & Date Table Modeling ✅ complete
+
+> Referred to as "Sprint 10" in its own implementation brief.
+
+- `DateTableDefinition[]` on `SemanticModel` (`dateTables`) — a Date Table is
+  an explicit, learner-driven marking (`markDateTable`/`unmarkDateTable`,
+  `runtime/dateTable/`), never inferred, and a model may mark more than one
+  (no hardcoded "the" Calendar table); legacy models hydrate with `[]`
+- Classic Power BI-style Date Table validation: table/column existence,
+  date/datetime type, no blanks, unique dates, contiguous day-by-day,
+  consistent datetime time-of-day — structured `DateTableDiagnostic`s, never
+  a raw JS error, and an invalid marking never becomes canonical model state
+- Model Canvas/Model editor: a `DATE TABLE` badge on a marked table's node, a
+  "Mark as Date Table" / "Unmark" control with inline validation feedback
+- a canonical, timezone-safe date-math layer (`runtime/dateTable/dateMath.ts`)
+  — UTC epoch-day arithmetic, Classic year/month shift with last-valid-day
+  clamping (Feb 29 → Feb 28, Jan 31 - 1 month → Feb 28/29)
+- `SAMEPERIODLASTYEAR`, `DATEADD` (YEAR/QUARTER/MONTH/DAY), `PREVIOUSMONTH`,
+  `PREVIOUSYEAR` and `DATESYTD` as a single new `BoundTimeIntelligenceTable`
+  table-expression variant (`runtime/tableExpression/`) — the same one
+  dispatch every table expression already shared, not a second engine
+- a new `DateTableReplace` `FilterModifier` (`runtime/measure/contextModifier.ts`):
+  a Classic time-intelligence date set *replaces* the marked Date Table's
+  entire current filter state rather than intersecting with it, so
+  `CALCULATE([Total Revenue], SAMEPERIODLASTYEAR(Calendar[Date]))` under a
+  `Year = 2025, Month = March` slicer correctly yields March 2024 — not blank
+- `TOTALYTD` as measure-binder sugar for
+  `CALCULATE(expression, DATESYTD(dates))`, reusing the identical bound shape
+  and evaluator — proven numerically identical in tests and live in the app
+- relationship propagation is untouched: a marked Date Table's filters still
+  only reach a fact table through an *active* relationship, exactly like any
+  other filter (verified by disabling `Calendar → Sales` and back)
+- Context Explorer and the execution trace pick up `SAMEPERIODLASTYEAR`/
+  `DATEADD`/etc. automatically via four new trace node kinds
+  (`date-table`/`time-intelligence`/`date-shift`/`date-period`) — no second
+  time-intelligence explainer was built
+- a new `date-table` Validation Engine rule type, and the existing
+  measure-result rule type grades YoY/YTD measures with no new rule type
+  needed
+- verified end-to-end against the built-in Retail sample (`Revenue LY`,
+  `Revenue PM`, `Revenue YTD`/`Revenue YTD Explicit`, `Revenue YoY`/
+  `Revenue YoY %`) and live in the running app via Playwright, including the
+  critical Year+Month filter-replacement regression and a hard-reload
+  persistence check
+
+**Exit:** the engine now covers "row context + filter context + context
+transition + CALCULATE + table expressions + iterators + date context + time
+intelligence." See [`docs/DATE_TABLES.md`](./docs/DATE_TABLES.md) and
+[`docs/TIME_INTELLIGENCE.md`](./docs/TIME_INTELLIGENCE.md) for implementation
+details, architecture, and known DAX compatibility limitations.
+
+---
+
 ## Phase 9 — Learning System
 
 - lesson catalog
@@ -327,12 +380,12 @@ details, architecture, and known DAX compatibility limitations.
 
 ## Later, only if validated
 
-- time intelligence & date modeling — proper Date Table semantics,
-  `SAMEPERIODLASTYEAR`/`DATEADD`/`PREVIOUSMONTH`/`PREVIOUSYEAR`,
-  `DATESYTD`/`TOTALYTD`, YoY/YoY%/YTD/MoM, date-table validation
-  (recommended next, now that Phase 8.5's iterator/table-expression
-  foundation exists — see [`docs/ITERATORS.md`](./docs/ITERATORS.md) "Known
-  DAX compatibility limitations")
+- advanced relationships & modeling — 1:1, many-to-many, bidirectional
+  filtering, inactive date relationships, `USERELATIONSHIP`, role-playing
+  Date dimensions, multiple fact tables, relationship ambiguity practice
+  (recommended next, now that Phase 8.6's Date Table foundation exists — see
+  [`docs/TIME_INTELLIGENCE.md`](./docs/TIME_INTELLIGENCE.md) "Known DAX
+  compatibility limitations")
 - custom datasets
 - shareable notebooks
 - desktop wrapper

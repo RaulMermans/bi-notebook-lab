@@ -70,6 +70,20 @@ export interface Measure {
   updatedAt: string
 }
 
+/**
+ * Marks `modelTableId` as a Classic Power BI-style Date Table with
+ * `dateColumn` as its canonical date column — the marking Sprint 10's
+ * time-intelligence functions (`SAMEPERIODLASTYEAR`, `DATEADD`, ...) require
+ * before they'll operate on a column (docs/DATE_TABLES.md). A model may
+ * contain more than one marked date table (Power BI allows role-playing date
+ * dimensions), so this is a plural, normalized list rather than a single
+ * `dateTableId` on `SemanticModel` — never hardcode "the" Calendar table.
+ */
+export interface DateTableDefinition {
+  modelTableId: string
+  dateColumn: ColumnRef
+}
+
 export interface SemanticModel {
   id: string
   name: string
@@ -83,6 +97,12 @@ export interface SemanticModel {
    * `undefined` leak into runtime code. See docs/MEASURES.md "Persistence".
    */
   measures: Measure[]
+  /**
+   * Always populated at runtime — models persisted before Sprint 10 won't
+   * have this field on disk, normalized to `[]` by `hydrateSemanticModel`
+   * exactly like `measures` above. See docs/DATE_TABLES.md "Persistence".
+   */
+  dateTables: DateTableDefinition[]
   createdAt: string
   updatedAt: string
 }

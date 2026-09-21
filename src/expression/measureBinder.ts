@@ -4,7 +4,8 @@ import { bindPredicateExpression, dedupeColumnRefs, describeBoundPredicate, type
 import type { FilterModifier } from '../runtime/measure/contextModifier'
 import { resolveLogicalColumn, type LogicalColumnRef } from '../runtime/measure/logicalColumn'
 import { bindTableExpression } from '../runtime/tableExpression/tableExpressionBinder'
-import type { BoundTableExpression } from '../runtime/tableExpression/tableExpressionTypes'
+import type { BoundTableExpression, BoundTimeIntelligenceTable } from '../runtime/tableExpression/tableExpressionTypes'
+import { bindDateColumnArgument } from '../runtime/timeIntelligence/timeIntelligenceBinder'
 import { bindIteratorCall, isIteratorFunctionName } from '../runtime/iterator/iteratorBinder'
 import type { BoundIteratorCall } from '../runtime/iterator/iteratorTypes'
 import { resolveTableRef } from '../runtime/model/modelRuntime'
@@ -521,6 +522,8 @@ function describeTableExpression(bound: BoundTableExpression): string {
       return `VALUES(${bound.tableName}[${bound.columnName}])`
     case 'DistinctTable':
       return `DISTINCT(${bound.tableName}[${bound.columnName}])`
+    case 'TimeIntelligenceTable':
+      return bound.label
   }
 }
 
@@ -549,13 +552,36 @@ function bindFilterFunction(node: FunctionCallNode, ctx: MeasureBindContext): { 
   }
 }
 
-/** Binds one CALCULATE filter argument — dispatches to REMOVEFILTERS/ALL/FILTER, or tries it as a direct boolean filter expression (sprint brief §12-§21). */
+const TIME_INTELLIGENCE_FUNCTION_NAMES = new Set(['SAMEPERIODLASTYEAR', 'DATEADD', 'PREVIOUSMONTH', 'PREVIOUSYEAR', 'DATESYTD'])
+
+/**
+ * Binds a Classic time-intelligence CALCULATE filter argument (sprint brief
+ * §18-§27, §30-§34) — delegates to the shared table-expression binder
+ * (`bindTableExpression` → `BoundTimeIntelligenceTable`), exactly like
+ * `bindFilterFunction` does for `FILTER`, so CALCULATE's usage and the
+ * standalone table-expression usage (`COUNTROWS(DATESYTD(...))`, sprint
+ * brief §37) are one binder, not two. Always table-wide *replacement* of the
+ * Date Table's own filters — see `DateTableReplaceModifier`
+ * (contextModifier.ts).
+ */
+function bindTimeIntelligenceFilterModifier(node: FunctionCallNode, ctx: MeasureBindContext): { modifier?: FilterModifier; diagnostics: ExpressionDiagnostic[] } {
+  const result = bindTableExpression(node, ctx)
+  if (!result.bound || result.bound.kind !== 'TimeIntelligenceTable') return { diagnostics: result.diagnostics }
+
+  return {
+    modifier: { kind: 'DateTableReplace', bound: result.bound, label: result.bound.label },
+    diagnostics: result.diagnostics,
+  }
+}
+
+/** Binds one CALCULATE filter argument — dispatches to REMOVEFILTERS/ALL/FILTER/time-intelligence, or tries it as a direct boolean filter expression (sprint brief §12-§21). */
 function bindCalculateFilterArgument(argNode: Expression, ctx: MeasureBindContext): { modifier?: FilterModifier; diagnostics: ExpressionDiagnostic[] } {
   if (argNode.kind === 'FunctionCall') {
     const name = argNode.name.toUpperCase()
     if (name === 'REMOVEFILTERS') return bindRemoveFilters(argNode, ctx)
     if (name === 'ALL') return bindAll(argNode, ctx)
     if (name === 'FILTER') return bindFilterFunction(argNode, ctx)
+    if (TIME_INTELLIGENCE_FUNCTION_NAMES.has(name)) return bindTimeIntelligenceFilterModifier(argNode, ctx)
     if (UNSUPPORTED_CALCULATE_ADJACENT_FUNCTIONS.has(name)) {
       return {
         diagnostics: [
@@ -714,6 +740,51 @@ function bindSelectedValue(node: FunctionCallNode, ctx: MeasureBindContext): Mea
   }
 }
 
+/**
+ * Binds `TOTALYTD(expression, Table[DateColumn])` (sprint brief §35-§36) as
+ * the semantic equivalent of `CALCULATE(expression, DATESYTD(Table[DateColumn]))`
+ * — literally the same `Calculate`/`DateTableReplace` bound shape, so
+ * evaluation reuses `evaluateCalculate` with zero new runtime code (sprint
+ * brief §35 "Do not duplicate YTD execution logic"). The first argument may
+ * be any measure expression, not only a plain aggregation (sprint brief §36).
+ */
+function bindTotalYtd(node: FunctionCallNode, ctx: MeasureBindContext): MeasureBindResult {
+  if (node.args.length !== 2) {
+    return {
+      diagnostics: [
+        diagnostic(
+          'error',
+          'TOTALYTD_INVALID_ARGUMENT',
+          'TOTALYTD expects exactly two arguments: TOTALYTD(expression, Table[DateColumn]).',
+          node.span,
+        ),
+      ],
+    }
+  }
+
+  const exprResult = bindMeasureNode(node.args[0], ctx)
+  const { resolved, diagnostics: dateDiagnostics } = bindDateColumnArgument(node.args[1], ctx, 'TOTALYTD')
+  const diagnostics = [...exprResult.diagnostics, ...dateDiagnostics]
+  if (!exprResult.bound || !resolved) return { diagnostics }
+
+  const boundTable: BoundTimeIntelligenceTable = {
+    kind: 'TimeIntelligenceTable',
+    operation: 'dates-ytd',
+    modelTableId: resolved.modelTableId,
+    dateColumn: resolved.dateColumn,
+    dateColumnName: resolved.dateColumnName,
+    tableName: resolved.tableName,
+    label: `DATESYTD(${resolved.tableName}[${resolved.dateColumnName}])`,
+    span: node.args[1].span,
+  }
+  const modifier: FilterModifier = { kind: 'DateTableReplace', bound: boundTable, label: boundTable.label }
+
+  return {
+    bound: { kind: 'Calculate', expression: exprResult.bound, modifiers: [modifier], label: 'TOTALYTD(...)', span: node.span },
+    diagnostics,
+  }
+}
+
 function bindMeasureFunctionCall(node: FunctionCallNode, ctx: MeasureBindContext): MeasureBindResult {
   const name = node.name.toUpperCase()
 
@@ -772,6 +843,21 @@ function bindMeasureFunctionCall(node: FunctionCallNode, ctx: MeasureBindContext
       ],
     }
   }
+
+  if (TIME_INTELLIGENCE_FUNCTION_NAMES.has(name)) {
+    return {
+      diagnostics: [
+        diagnostic(
+          'error',
+          'UNSUPPORTED_FUNCTION',
+          `"${node.name}" produces a table of dates — it's only supported as a CALCULATE filter argument or the table argument to COUNTROWS, e.g. CALCULATE([Total Revenue], ${node.name}(...)) or COUNTROWS(${node.name}(...)).`,
+          node.nameSpan,
+        ),
+      ],
+    }
+  }
+
+  if (name === 'TOTALYTD') return bindTotalYtd(node, ctx)
 
   if (name === 'IF') return bindIfMeasure(node, ctx)
   if (name === 'SWITCH') return bindSwitchMeasure(node, ctx)

@@ -1,6 +1,8 @@
 import type { Dataset } from '../../domain/data'
 import type { SemanticModel } from '../../domain/model'
+import type { ExpressionDiagnostic } from '../../expression/diagnostics'
 import type { ExecutionTraceNode } from '../../expression/trace'
+import { evaluateTimeIntelligenceTable } from '../timeIntelligence/timeIntelligenceEvaluator'
 import { evaluatePredicateForRow } from '../measure/booleanFilter'
 import { isRowVisible, visibleRowIndices, type ResolvedFilterState } from '../measure/filterPropagation'
 import { resolveTableRef } from '../model/modelRuntime'
@@ -18,6 +20,8 @@ export interface EvaluatedTableExpression {
   /** The model table every row is ultimately lineage-rooted at (a `FilterTable`'s own table, or a `VALUES`/`DISTINCT` column's owning table). */
   modelTableId: string
   trace: ExecutionTraceNode
+  /** Sprint 10: a runtime-only failure that can only be detected once the *actual* visible dates are known (e.g. `DATEADD`'s non-contiguous-context check, sprint brief §26) — absent for every other table-expression kind, whose failures are always caught at bind time. */
+  diagnostics?: ExpressionDiagnostic[]
 }
 
 function resolveRowCount(model: SemanticModel, datasets: Record<string, Dataset>, modelTableId: string): number {
@@ -108,6 +112,8 @@ export function evaluateTableExpression(bound: BoundTableExpression, ctx: TableE
     case 'ValuesTable':
     case 'DistinctTable':
       return evaluateColumnTable(bound, ctx)
+    case 'TimeIntelligenceTable':
+      return evaluateTimeIntelligenceTable(bound, ctx)
   }
 }
 

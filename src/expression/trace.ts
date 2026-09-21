@@ -32,6 +32,11 @@ export type TraceNodeKind =
   | 'context-transition'
   | 'conditional'
   | 'switch-case'
+  // Sprint 10 (Date Tables / Time Intelligence) — see docs/TIME_INTELLIGENCE.md "Execution trace".
+  | 'date-table'
+  | 'time-intelligence'
+  | 'date-shift'
+  | 'date-period'
 
 export interface ExecutionTraceNode {
   kind: TraceNodeKind

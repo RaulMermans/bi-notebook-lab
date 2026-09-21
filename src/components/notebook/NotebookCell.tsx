@@ -4,6 +4,7 @@ import type { CalculatedColumn, ColumnRef, Measure, RelationshipDiagnostic, Sema
 import type { ValidationRun } from '../../domain/validation'
 import type { VisualSpec } from '../../domain/visual'
 import type { ExpressionDiagnostic } from '../../expression/diagnostics'
+import type { DateTableDiagnostic } from '../../runtime/dateTable/dateTableTypes'
 import type { CalculatedColumnExecution } from '../../runtime/calculatedColumn/calculatedColumnRuntime'
 import type { FilterContext } from '../../runtime/measure/filterContext'
 import type { MeasureExecution } from '../../runtime/measure/measureRuntime'
@@ -30,6 +31,8 @@ interface NotebookCellProps {
   ) => Promise<RelationshipDiagnostic[]>
   onRemoveRelationship: (modelId: string, relationshipId: string) => void
   onSetRelationshipActive: (modelId: string, relationshipId: string, active: boolean) => void
+  onMarkDateTable: (modelId: string, modelTableId: string, dateColumn: ColumnRef) => Promise<DateTableDiagnostic[]>
+  onUnmarkDateTable: (modelId: string, modelTableId: string) => void
   onUpdateCalculatedColumn: (
     modelId: string,
     calculatedColumnId: string,
@@ -66,6 +69,8 @@ export function NotebookCell({
   onCreateRelationship,
   onRemoveRelationship,
   onSetRelationshipActive,
+  onMarkDateTable,
+  onUnmarkDateTable,
   onUpdateCalculatedColumn,
   onRemoveCalculatedColumnCell,
   onUpdateMeasure,
@@ -99,6 +104,8 @@ export function NotebookCell({
         onCreateRelationship={(input) => onCreateRelationship(cell.modelId, input)}
         onRemoveRelationship={(relationshipId) => onRemoveRelationship(cell.modelId, relationshipId)}
         onSetRelationshipActive={(relationshipId, active) => onSetRelationshipActive(cell.modelId, relationshipId, active)}
+        onMarkDateTable={(modelTableId, dateColumn) => onMarkDateTable(cell.modelId, modelTableId, dateColumn)}
+        onUnmarkDateTable={(modelTableId) => onUnmarkDateTable(cell.modelId, modelTableId)}
       />
     )
   }

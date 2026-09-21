@@ -232,6 +232,9 @@ function evaluateNode(node: BoundMeasureExpression, ctx: MeasureEvalContext): No
       // evaluator with CALCULATE's FILTER modifier and the iterator functions,
       // rather than a second row-counting implementation.
       const evaluated = evaluateTableExpression(node.table, { model: ctx.model, datasets: ctx.datasets, filterState: ctx.filterState })
+      if (evaluated.diagnostics && evaluated.diagnostics.length > 0) {
+        return { value: null, diagnostics: evaluated.diagnostics, trace: evaluated.trace }
+      }
       const totalRows = tableExpressionRowCount(node.table, ctx.model, ctx.datasets)
       const result = computeCountRows(node.label, evaluated.rows.length, totalRows)
       return { value: result.value, diagnostics: [], trace: { ...result.trace, children: [evaluated.trace] } }
@@ -425,10 +428,25 @@ function evaluateCalculate(
 ): NodeResult & { effectiveFilterState: ResolvedFilterState } {
   const nextEffectiveContext = cloneEffectiveContext(ctx.effectiveContext)
   const modifierTraces: ExecutionTraceNode[] = []
+  const modifierDiagnostics: ExpressionDiagnostic[] = []
 
   for (const modifier of node.modifiers) {
     const outcome = applyFilterModifier(ctx.model, ctx.datasets, nextEffectiveContext, modifier, ctx.filterState)
     modifierTraces.push(buildModifierTraceNode(outcome))
+    if (outcome.diagnostics) modifierDiagnostics.push(...outcome.diagnostics)
+  }
+
+  // A runtime-only modifier failure (Sprint 10: DATEADD's non-contiguous-context
+  // check, sprint brief §26) can only be known once modifiers are actually
+  // applied — bail out before resolving/evaluating the inner expression, the
+  // same way an invalid FilterContext bails out of `evaluateMeasure` itself.
+  if (modifierDiagnostics.some((d) => d.severity === 'error')) {
+    return {
+      value: null,
+      diagnostics: modifierDiagnostics,
+      trace: { kind: 'calculate', label: node.label, value: null, children: modifierTraces },
+      effectiveFilterState: ctx.filterState,
+    }
   }
 
   const innerFilterContext = toFilterContext(nextEffectiveContext)
@@ -472,6 +490,14 @@ function buildModifierTraceNode(outcome: ReturnType<typeof applyFilterModifier>)
   }
   if (outcome.kind === 'ReplaceColumnFilter') {
     return { kind: 'boolean-filter', label: outcome.label }
+  }
+  if (outcome.kind === 'DateTableReplace') {
+    return {
+      kind: 'date-table',
+      label: outcome.label,
+      metadata: { tableName: outcome.tableName, inputRows: outcome.inputRows, rowsMatched: outcome.rowsMatched },
+      children: outcome.trace ? [outcome.trace] : undefined,
+    }
   }
   return { kind: 'remove-filters', label: outcome.label, metadata: { removed: outcome.removedLabels ?? [] } }
 }

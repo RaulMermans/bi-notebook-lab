@@ -128,11 +128,22 @@ conditional logic (`IF`/`SWITCH`) on top. This repository now contains:
   the comparison/logical/`IF`/`SWITCH` support Sprint 8 deliberately
   deferred (`Order Size = IF(Sales[Revenue] >= 1000, "Large", "Standard")`).
 
-Bidirectional/many-to-many relationships and time intelligence are **not**
-implemented yet — see [`docs/ITERATORS.md`](./docs/ITERATORS.md),
-[`docs/TABLE_EXPRESSIONS.md`](./docs/TABLE_EXPRESSIONS.md) and
-[`docs/CALCULATE.md`](./docs/CALCULATE.md) for the exact scope and known
-limitations.
+- **Date Tables & Classic time intelligence** — mark a table as a Date
+  Table (with Power BI-style validation: contiguous, unique, non-blank
+  dates), then write `SAMEPERIODLASTYEAR`, `DATEADD`, `PREVIOUSMONTH`,
+  `PREVIOUSYEAR`, `DATESYTD` and `TOTALYTD` measures. A time-intelligence
+  date set correctly *replaces* the Date Table's filters instead of
+  intersecting with them, so `CALCULATE([Total Revenue],
+  SAMEPERIODLASTYEAR(Calendar[Date]))` under a `Year = 2025, Month = March`
+  slicer yields March 2024 — not blank.
+
+Bidirectional/many-to-many relationships and calendar-based (Auto date/time)
+time intelligence are **not** implemented yet — see
+[`docs/ITERATORS.md`](./docs/ITERATORS.md),
+[`docs/TABLE_EXPRESSIONS.md`](./docs/TABLE_EXPRESSIONS.md),
+[`docs/CALCULATE.md`](./docs/CALCULATE.md) and
+[`docs/TIME_INTELLIGENCE.md`](./docs/TIME_INTELLIGENCE.md) for the exact
+scope and known limitations.
 
 ## Run locally
 
@@ -187,6 +198,18 @@ the `Customers[Country]` Slicer. Add a calculated column `Revenue Band =
 SWITCH(TRUE(), Sales[Revenue] >= 2000, "Large", Sales[Revenue] >= 500,
 "Medium", "Small")` and preview it row by row.
 
+Mark `Calendar` as a Date Table (using `Calendar[Date]`) in the Model
+editor, then create `Revenue LY = CALCULATE([Total Revenue],
+SAMEPERIODLASTYEAR(Calendar[Date]))`. Select `Year = 2025, Month = March`
+in the Context Explorer and watch `Revenue LY` compute March 2024's
+revenue — not blank, and not intersected with `Year = 2025`. Add `Revenue
+YoY = [Total Revenue] - [Revenue LY]`, `Revenue PM =
+CALCULATE([Total Revenue], PREVIOUSMONTH(Calendar[Date]))` and `Revenue YTD
+= TOTALYTD([Total Revenue], Calendar[Date])`, put all four on a Line
+Visual against `Calendar[Month]`, and compare `Revenue YTD` to
+`CALCULATE([Total Revenue], DATESYTD(Calendar[Date]))` — they always
+match.
+
 ## Core documents
 
 - [`PRODUCT.md`](./PRODUCT.md)
@@ -206,6 +229,8 @@ SWITCH(TRUE(), Sales[Revenue] >= 2000, "Large", Sales[Revenue] >= 500,
 - [`docs/CALCULATE.md`](./docs/CALCULATE.md)
 - [`docs/TABLE_EXPRESSIONS.md`](./docs/TABLE_EXPRESSIONS.md)
 - [`docs/ITERATORS.md`](./docs/ITERATORS.md)
+- [`docs/DATE_TABLES.md`](./docs/DATE_TABLES.md)
+- [`docs/TIME_INTELLIGENCE.md`](./docs/TIME_INTELLIGENCE.md)
 
 ## Scope guardrail
 

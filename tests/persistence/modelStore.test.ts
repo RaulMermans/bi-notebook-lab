@@ -12,6 +12,7 @@ function fakeModel(id: string): SemanticModel {
     relationships: [],
     calculatedColumns: [],
     measures: [],
+    dateTables: [],
     createdAt: now,
     updatedAt: now,
   }
@@ -62,5 +63,25 @@ describe('modelStore persistence', () => {
     const restored = await loadModel('model-legacy')
 
     expect(restored?.measures).toEqual([])
+  })
+
+  it('hydrates a pre-Sprint-10 persisted model (no `dateTables` field) with an empty dateTables array', async () => {
+    const legacyStore = createStore('bi-notebook-lab-models', 'models')
+    const now = new Date().toISOString()
+    const legacyModel = {
+      id: 'model-legacy-no-datetables',
+      name: 'model-legacy-no-datetables',
+      tables: [],
+      relationships: [],
+      calculatedColumns: [],
+      measures: [],
+      createdAt: now,
+      updatedAt: now,
+    }
+    await set('model-legacy-no-datetables', legacyModel, legacyStore)
+
+    const restored = await loadModel('model-legacy-no-datetables')
+
+    expect(restored?.dateTables).toEqual([])
   })
 })

@@ -116,6 +116,17 @@ export function useNotebookRuntime() {
         const model = runtime.getModel(modelId)
         if (model) await saveModel(model)
       },
+      async markDateTable(modelId: string, modelTableId: string, dateColumn: ColumnRef) {
+        const diagnostics = runtime.markDateTable(modelId, modelTableId, dateColumn)
+        const model = runtime.getModel(modelId)
+        if (model) await saveModel(model)
+        return diagnostics
+      },
+      async unmarkDateTable(modelId: string, modelTableId: string): Promise<void> {
+        runtime.unmarkDateTable(modelId, modelTableId)
+        const model = runtime.getModel(modelId)
+        if (model) await saveModel(model)
+      },
       async createCalculatedColumnCell(modelId: string, input: CalculatedColumnInput) {
         const result = runtime.createCalculatedColumnCell(modelId, input)
         const model = runtime.getModel(modelId)

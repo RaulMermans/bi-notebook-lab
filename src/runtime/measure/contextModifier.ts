@@ -1,9 +1,12 @@
 import type { Dataset } from '../../domain/data'
 import type { ColumnRef, SemanticModel } from '../../domain/model'
+import type { ExpressionDiagnostic } from '../../expression/diagnostics'
+import type { ExecutionTraceNode } from '../../expression/trace'
 import { modelTableFor } from '../model/graphAnalysis'
 import { resolveTableRef } from '../model/modelRuntime'
+import { computeTimeIntelligenceRowIndexes } from '../timeIntelligence/timeIntelligenceEvaluator'
 import { evaluateTableExpression, tableExpressionRowIndexSet } from '../tableExpression/tableExpressionEvaluator'
-import type { BoundFilterTable } from '../tableExpression/tableExpressionTypes'
+import type { BoundFilterTable, BoundTimeIntelligenceTable } from '../tableExpression/tableExpressionTypes'
 import type { BoundPredicateNode } from './booleanFilter'
 import type { ColumnFilter, FilterContext } from './filterContext'
 import { selectionSize, type ResolvedFilterState } from './filterPropagation'
@@ -59,12 +62,29 @@ export interface ClearAllFiltersModifier {
   label: string
 }
 
+/**
+ * Sprint 10 (Classic Time Intelligence, sprint brief §20-§22): a Classic
+ * time-intelligence table (`SAMEPERIODLASTYEAR`, `DATEADD`, `PREVIOUSMONTH`,
+ * `PREVIOUSYEAR`, `DATESYTD`) replaces the marked Date Table's *entire*
+ * current filter state with a freshly computed date set — never an ordinary
+ * intersection (`mergeFilterContexts`) and never routed through
+ * `PredicateFilter`'s boolean-predicate machinery, since the target date set
+ * is computed deterministically, not learner-authored. See
+ * docs/TIME_INTELLIGENCE.md "Date Table filter replacement".
+ */
+export interface DateTableReplaceModifier {
+  kind: 'DateTableReplace'
+  bound: BoundTimeIntelligenceTable
+  label: string
+}
+
 export type FilterModifier =
   | ReplaceColumnFilterModifier
   | PredicateFilterModifier
   | RemoveColumnsModifier
   | RemoveTablesModifier
   | ClearAllFiltersModifier
+  | DateTableReplaceModifier
 
 export interface EffectiveTableSelection {
   modelTableId: string
@@ -139,6 +159,10 @@ export interface ModifierOutcome {
   tableName?: string
   inputRows?: number
   rowsMatched?: number
+  /** Sprint 10: a runtime-only failure (e.g. `DATEADD_NON_CONTIGUOUS_CONTEXT`) that can only be detected once the modifier is actually applied — absent for every other modifier kind. */
+  diagnostics?: ExpressionDiagnostic[]
+  /** Sprint 10: `DateTableReplace`'s rich date-shift trace (sprint brief §46) — built by `computeTimeIntelligenceRowIndexes`, surfaced as-is rather than re-derived. */
+  trace?: ExecutionTraceNode
 }
 
 /**
@@ -258,6 +282,55 @@ export function applyFilterModifier(
       }
 
       return { kind: modifier.kind, label: modifier.label, tableName: resolved.table.name, inputRows, rowsMatched: matched.size }
+    }
+
+    case 'DateTableReplace': {
+      const modelTableId = modifier.bound.modelTableId
+      const modelTable = model.tables.find((t) => t.id === modelTableId)
+      const resolved = modelTable ? resolveTableRef(datasets, modelTable) : undefined
+      if (!resolved) {
+        return { kind: modifier.kind, label: modifier.label, tableName: 'Unknown table', inputRows: 0, rowsMatched: 0 }
+      }
+
+      const totalRows = resolved.table.rowCount
+      const inputRows = selectionSize(ambientState.rowSelections.get(modelTableId) ?? 'all', totalRows)
+      const computed = computeTimeIntelligenceRowIndexes(modifier.bound, model, datasets, ambientState)
+
+      if (computed.diagnostics.length > 0) {
+        return {
+          kind: modifier.kind,
+          label: modifier.label,
+          tableName: resolved.table.name,
+          inputRows,
+          rowsMatched: 0,
+          diagnostics: computed.diagnostics,
+          trace: computed.trace,
+        }
+      }
+
+      // Replace — never intersect — every existing filter on the Date Table
+      // (sprint brief §20-§22): a time-intelligence date set stands on its
+      // own, it doesn't narrow whatever Year/Month filter was already there.
+      for (const [key, filter] of [...ctx.columnFilters.entries()]) {
+        const owner = modelTableFor(model, filter.column)
+        if (owner?.id === modelTableId) ctx.columnFilters.delete(key)
+      }
+      ctx.tableSelections.set(modelTableId, {
+        modelTableId,
+        includedRowIndexes: computed.rowIndexes,
+        totalRows,
+        scopeColumns: null,
+        label: modifier.label,
+      })
+
+      return {
+        kind: modifier.kind,
+        label: modifier.label,
+        tableName: resolved.table.name,
+        inputRows,
+        rowsMatched: computed.rowIndexes.size,
+        trace: computed.trace,
+      }
     }
   }
 }

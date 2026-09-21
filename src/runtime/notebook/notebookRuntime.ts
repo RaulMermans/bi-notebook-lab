@@ -10,6 +10,8 @@ import type { CalculatedColumnExecution, CalculatedColumnInput } from '../calcul
 import * as measureRuntime from '../measure/measureRuntime'
 import type { MeasureExecution, MeasureInput } from '../measure/measureRuntime'
 import * as modelRuntime from '../model/modelRuntime'
+import * as dateTableRuntime from '../dateTable/dateTableRuntime'
+import type { DateTableDiagnostic } from '../dateTable/dateTableTypes'
 
 export interface NotebookRuntimeSnapshot {
   notebook: NotebookDocument
@@ -204,6 +206,21 @@ export class NotebookRuntime {
     const model = this.getModel(modelId)
     if (!model) return
     this.commitModel(modelRuntime.setRelationshipActive(model, relationshipId, active))
+  }
+
+  /** Validates and, if valid, marks `modelTableId` as a Date Table (docs/DATE_TABLES.md) — never partially applies an invalid marking. */
+  markDateTable(modelId: string, modelTableId: string, dateColumn: ColumnRef): DateTableDiagnostic[] {
+    const model = this.getModel(modelId)
+    if (!model) return []
+    const result = dateTableRuntime.markDateTable(model, this.snapshot.datasets, modelTableId, dateColumn)
+    this.commitModel(result.model)
+    return result.diagnostics
+  }
+
+  unmarkDateTable(modelId: string, modelTableId: string): void {
+    const model = this.getModel(modelId)
+    if (!model) return
+    this.commitModel(dateTableRuntime.unmarkDateTable(model, modelTableId))
   }
 
   /**

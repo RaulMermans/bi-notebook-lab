@@ -54,6 +54,13 @@ export type ExpressionDiagnosticCode =
   | 'IF_CONDITION_NOT_BOOLEAN'
   | 'INVALID_SWITCH_ARGUMENT'
   | 'SELECTEDVALUE_INVALID_ARGUMENT'
+  // Sprint 10 (Date Tables / Time Intelligence) — see docs/DATE_TABLES.md and docs/TIME_INTELLIGENCE.md.
+  | 'DATE_TABLE_REQUIRED'
+  | 'TIME_INTELLIGENCE_INVALID_ARGUMENT'
+  | 'DATEADD_INVALID_INTERVAL'
+  | 'DATEADD_INTERVAL_COUNT_INVALID'
+  | 'DATEADD_NON_CONTIGUOUS_CONTEXT'
+  | 'TOTALYTD_INVALID_ARGUMENT'
 
 export interface ExpressionDiagnostic {
   severity: ExpressionDiagnosticSeverity

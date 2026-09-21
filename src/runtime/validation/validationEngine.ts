@@ -3,6 +3,7 @@ import type { TestCell } from '../../domain/notebook'
 import type { SemanticModel } from '../../domain/model'
 import type { ValidationRule, ValidationRuleResult, ValidationRun } from '../../domain/validation'
 import { evaluateCalculatedColumnResultRule } from './calculatedColumnValidation'
+import { evaluateDateTableRule } from './dateTableValidationRule'
 import { computeValidationFingerprint } from './fingerprint'
 import { evaluateMeasureResultRule } from './measureValidation'
 import { computeValidationRun } from './scoring'
@@ -29,6 +30,8 @@ function evaluateRule(rule: ValidationRule, model: SemanticModel, datasets: Reco
       return evaluateMeasureResultRule(rule, model, datasets)
     case 'expression-semantics':
       return evaluateExpressionSemanticRule(rule, model, datasets)
+    case 'date-table':
+      return evaluateDateTableRule(rule, model, datasets)
   }
 }
 

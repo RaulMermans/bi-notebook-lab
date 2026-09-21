@@ -526,6 +526,126 @@ tests whose *diagnostic code* (not behavior) changed as a direct result of
 the FILTER refactor were updated in place (see `docs/TABLE_EXPRESSIONS.md`
 "FILTER — one implementation, two callers").
 
+## Sprint 10 implementation (Date Tables & Classic Time Intelligence)
+
+```text
+domain/model.ts                   + DateTableDefinition { modelTableId, dateColumn }
+                                     + SemanticModel.dateTables — plural (a model may mark
+                                     more than one Date Table), never a single global
+                                     "Calendar" id
+
+runtime/model/modelRuntime.ts     hydrateSemanticModel() + dateTables: model.dateTables ?? []
+                                     (identical pattern to Sprint 4's measures ?? []);
+                                     createModel() seeds dateTables: []; removeTable() also
+                                     drops that table's DateTableDefinition (no dangling
+                                     metadata)
+
+runtime/dateTable/                NEW — Date Table domain runtime, no React dependency
+  dateMath.ts                       ModelDate + parseModelDate/formatModelDate/
+                                     compareModelDates/addDays/addMonthsClassic/
+                                     addYearsClassic/shiftByInterval/startOfMonth/
+                                     endOfMonth/startOfYear/endOfYear — UTC epoch-day
+                                     arithmetic, never local-time Date getters/setters
+  dateTableTypes.ts                 DateTableDiagnosticCode/DateTableDiagnostic/
+                                     DateTableValidationResult — a diagnostic union of its
+                                     own, distinct from ModelDiagnosticCode/
+                                     ExpressionDiagnosticCode
+  dateTableRuntime.ts               validateDateTableDefinition() (type/blanks/uniqueness/
+                                     contiguity/datetime-consistency checks) +
+                                     markDateTable()/unmarkDateTable()/
+                                     getDateTableDefinition()/findDateTableDefinitionForColumn()
+                                     — markDateTable() validates-then-applies, mirroring
+                                     modelRuntime.createRelationship()'s shape; an invalid
+                                     marking never becomes canonical model state
+
+runtime/timeIntelligence/         NEW — the Classic time-intelligence layer
+  timeIntelligenceBinder.ts         bindDateColumnArgument() (shared Table[Column]
+                                     resolution + the "marked Date Table required" check)
+                                     + bindSamePeriodLastYear/bindDateAdd/
+                                     bindPreviousMonth/bindPreviousYear/bindDatesYtd —
+                                     DATEADD's YEAR/QUARTER/MONTH/DAY bind as bare
+                                     identifiers (TableReferenceNode), never string
+                                     literals; its offset must be a constant integer
+  timeIntelligenceEvaluator.ts      computeTimeIntelligenceRowIndexes() — reads "currently
+                                     visible dates" from a ResolvedFilterState, applies the
+                                     operation's date math, and resolves the result against
+                                     a Date Table row index built once (O(visible dates +
+                                     date table size), never scans the fact table); DATEADD
+                                     rejects a non-contiguous current context here (a
+                                     runtime-only check — the actual visible dates aren't
+                                     known at bind time) + evaluateTimeIntelligenceTable()
+                                     for bare table-expression usage (COUNTROWS(...))
+
+runtime/tableExpression/
+  tableExpressionTypes.ts          + BoundTimeIntelligenceTable — one new variant for all
+                                     five functions (operation: 'same-period-last-year' |
+                                     'date-add' | 'previous-month' | 'previous-year' |
+                                     'dates-ytd'), not a second table-expression kind
+  tableExpressionBinder.ts         bindTableExpression() dispatches SAMEPERIODLASTYEAR/
+                                     DATEADD/PREVIOUSMONTH/PREVIOUSYEAR/DATESYTD to
+                                     runtime/timeIntelligence/timeIntelligenceBinder.ts
+  tableExpressionEvaluator.ts      + 'TimeIntelligenceTable' case delegating to
+                                     evaluateTimeIntelligenceTable(); EvaluatedTableExpression
+                                     gained an optional diagnostics field for DATEADD's
+                                     runtime-only non-contiguous-context failure
+
+runtime/measure/contextModifier.ts + DateTableReplaceModifier { bound: BoundTimeIntelligenceTable }
+                                     — a new FilterModifier variant that *replaces* the
+                                     Date Table's entire current filter state (clears every
+                                     existing column filter/table selection on that table,
+                                     installs the computed row set) rather than
+                                     intersecting, matching real Power BI semantics; a
+                                     runtime diagnostic (e.g. DATEADD's non-contiguous
+                                     context) short-circuits CALCULATE before the inner
+                                     expression evaluates
+
+expression/
+  diagnostics.ts                   + DATE_TABLE_REQUIRED/TIME_INTELLIGENCE_INVALID_ARGUMENT/
+                                     DATEADD_INVALID_INTERVAL/DATEADD_INTERVAL_COUNT_INVALID/
+                                     DATEADD_NON_CONTIGUOUS_CONTEXT/TOTALYTD_INVALID_ARGUMENT
+  trace.ts                         + date-table | time-intelligence | date-shift |
+                                     date-period trace node kinds
+  measureBinder.ts                 + bindTimeIntelligenceFilterModifier() (dispatched from
+                                     bindCalculateFilterArgument for all five functions,
+                                     mirroring bindFilterFunction's exact shape) +
+                                     bindTotalYtd() — TOTALYTD binds directly to the same
+                                     Calculate/DateTableReplace shape CALCULATE(expr,
+                                     DATESYTD(...)) would produce; zero new evaluator code
+
+runtime/validation/
+  dateTableValidationRule.ts       NEW — evaluateDateTableRule() for the new 'date-table'
+                                     ValidationRule type; measure-result rules already
+                                     grade YoY/YTD measures with no new rule type
+  validationEngine.ts              + 'date-table' case in evaluateRule()
+
+domain/validation.ts               + DateTableValidationRule + 'date-table' in
+                                     ValidationRuleType — no hydration needed (validation
+                                     specs were never hydrated to begin with)
+
+components/notebook/
+  model/DateTableControls.tsx       NEW — per-table "Mark as Date Table" / validated badge
+                                     / "Unmark" control, wired through ModelCellCard.tsx →
+                                     NotebookCell.tsx → App.tsx exactly like every other
+                                     model mutation
+  model/ModelTableNode.tsx          + a DATE TABLE badge in the node header
+  model/ModelCanvas.tsx             deriveNodes() looks up the table's DateTableDefinition
+```
+
+No Context Explorer or Visual Cell code changed at all: both already render
+`ExecutionTraceNode` trees and `evaluateMeasure()` output generically, so
+`Revenue LY`/`Revenue PM`/`Revenue YTD` "just work" — including the four new
+trace node kinds appearing automatically inside CALCULATE's modifier trace,
+confirmed live via a Playwright walkthrough of the Retail sample: marking
+Calendar as a Date Table, creating all six required Sprint 10 measures, and
+verifying `Revenue LY` computes March 2024's revenue (not blank) under a
+`Year = 2025, Month = March` slicer, that `Revenue PM` under March 2025
+exactly matches an independently-filtered February 2025 total, that
+`TOTALYTD` and `CALCULATE(...DATESYTD(...))` render identical values, and
+that both the Date Table marking and every measure survive a hard reload
+with zero console errors. See [`docs/DATE_TABLES.md`](./docs/DATE_TABLES.md)
+and [`docs/TIME_INTELLIGENCE.md`](./docs/TIME_INTELLIGENCE.md) for the full
+design and known DAX compatibility limitations.
+
 ## Expression strategy
 
 Do not implement full DAX.

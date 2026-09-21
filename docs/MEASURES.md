@@ -159,8 +159,11 @@ See [`CALCULATE.md`](./CALCULATE.md) for `CALCULATE`/`FILTER`/
 `SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX` and [`docs/TABLE_EXPRESSIONS.md`](./TABLE_EXPRESSIONS.md)
 for `VALUES`/`DISTINCT` as reusable table expressions (Sprint 9). Measures
 also now support `IF`, `SWITCH`, `BLANK()` and `SELECTEDVALUE` — see
-"Conditional logic and SELECTEDVALUE" below. Time intelligence remains out of
-scope.
+"Conditional logic and SELECTEDVALUE" below. Classic Date Table time
+intelligence (`SAMEPERIODLASTYEAR`, `DATEADD`, `PREVIOUSMONTH`,
+`PREVIOUSYEAR`, `DATESYTD`, `TOTALYTD`) is implemented as of Sprint 10 —
+see [`docs/TIME_INTELLIGENCE.md`](./TIME_INTELLIGENCE.md); calendar-based
+(Auto date/time) time intelligence remains out of scope.
 
 ### Conditional logic and SELECTEDVALUE (Sprint 9)
 

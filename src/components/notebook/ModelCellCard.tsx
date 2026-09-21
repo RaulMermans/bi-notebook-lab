@@ -2,9 +2,11 @@ import { useMemo, useState } from 'react'
 import type { ModelCell } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
 import type { ColumnRef, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
+import type { DateTableDiagnostic } from '../../runtime/dateTable/dateTableTypes'
 import { resolveColumnRef } from '../../runtime/model/modelRuntime'
 import { validateModel } from '../../runtime/model/graphAnalysis'
 import { ContextExplorer } from '../context/ContextExplorer'
+import { DateTableControls } from './model/DateTableControls'
 import { ModelCanvas } from './model/ModelCanvas'
 import { ModelHealthSummary, modelHealthLabel } from './model/ModelHealthSummary'
 import { RelationshipForm } from './model/RelationshipForm'
@@ -23,6 +25,8 @@ interface ModelCellCardProps {
   onCreateRelationship: (input: { one: ColumnRef; many: ColumnRef; active: boolean }) => Promise<RelationshipDiagnostic[]>
   onRemoveRelationship: (relationshipId: string) => void
   onSetRelationshipActive: (relationshipId: string, active: boolean) => void
+  onMarkDateTable: (modelTableId: string, dateColumn: ColumnRef) => Promise<DateTableDiagnostic[]>
+  onUnmarkDateTable: (modelTableId: string) => void
 }
 
 function columnLabel(datasets: Record<string, Dataset>, ref: ColumnRef): string {
@@ -42,6 +46,8 @@ export function ModelCellCard({
   onCreateRelationship,
   onRemoveRelationship,
   onSetRelationshipActive,
+  onMarkDateTable,
+  onUnmarkDateTable,
 }: ModelCellCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [view, setView] = useState<ModelCellView>('model')
@@ -128,6 +134,13 @@ export function ModelCellCard({
                     {model.tables.map((table) => (
                       <li key={table.id}>
                         <span>{datasets[table.datasetId]?.tables.find((t) => t.id === table.tableId)?.name ?? table.tableId}</span>
+                        <DateTableControls
+                          model={model}
+                          datasets={datasets}
+                          table={table}
+                          onMarkDateTable={onMarkDateTable}
+                          onUnmarkDateTable={onUnmarkDateTable}
+                        />
                         <button type="button" className="text-button" onClick={() => onRemoveTable(table.id)}>
                           Remove
                         </button>

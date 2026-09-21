@@ -1,4 +1,4 @@
-# Context Visualizer (Sprint 6 + Sprint 8 + Sprint 9)
+# Context Visualizer (Sprint 6 + Sprint 8 + Sprint 9 + Sprint 10)
 
 This document describes the Context Explorer: a reusable surface that makes
 Sprint 4's filter-context/relationship-propagation mechanics visually
@@ -29,6 +29,20 @@ way Sprint 8 needed none. A measure reference *inside* an iterator's row
 expression gets its own nested `context-transition` trace node per visited
 row (bounded to the first 10 — `docs/ITERATORS.md` "Context transition
 trace"), which the existing trace tree already renders recursively.
+
+**Sprint 10 compatibility:** a time-intelligence measure (`Revenue LY`,
+`Revenue PM`, `Revenue YTD`, ...) is a `CALCULATE` at its top level, so it
+already gets Sprint 8's internal/external context substitution — the
+Explorer's diagram shows the Date Table's *shifted* selection (e.g. "March
+2024"), not the external "March 2025" slicer, and the relationship-
+propagation diagram shows the resulting Calendar → Sales row-count change.
+The new `date-table`/`time-intelligence`/`date-shift`/`date-period` trace
+kinds (`docs/TIME_INTELLIGENCE.md` "Trace / Context Explorer / Visual
+Cells") render through the same generic `TraceTree` component with **zero
+component changes** — confirmed live: selecting `Revenue LY` in the
+Explorer and adding a `Year = 2025, Month = March` filter immediately shows
+the "Current visible dates → Shift → Result" breakdown and the correct
+non-blank value.
 
 ## Purpose
 

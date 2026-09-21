@@ -43,6 +43,8 @@ function keyColumnIdsFor(model: SemanticModel, modelTable: SemanticModel['tables
 function deriveNodes(model: SemanticModel, datasets: Record<string, Dataset>): ModelTableNodeType[] {
   return model.tables.map((table, index) => {
     const resolved = resolveTableRef(datasets, table)
+    const dateTableDefinition = model.dateTables.find((dt) => dt.modelTableId === table.id)
+    const dateColumnName = dateTableDefinition && resolved?.table.columns.find((c) => c.id === dateTableDefinition.dateColumn.columnId)?.name
     return {
       id: table.id,
       type: 'modelTable',
@@ -53,6 +55,8 @@ function deriveNodes(model: SemanticModel, datasets: Record<string, Dataset>): M
         keyColumnIds: keyColumnIdsFor(model, table),
         calculatedColumns: model.calculatedColumns.filter((c) => c.modelTableId === table.id),
         measures: model.measures.filter((m) => m.homeModelTableId === table.id),
+        isDateTable: Boolean(dateTableDefinition),
+        dateColumnName,
       },
     }
   })

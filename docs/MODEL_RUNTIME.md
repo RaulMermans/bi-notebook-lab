@@ -205,6 +205,17 @@ between renders; the only write path back to the model is
 `onNodeDragStop`, which calls `moveModelTable` (not `onNodeDrag`, so dragging
 doesn't write to IndexedDB on every pointer-move frame).
 
+## Sprint 10 addendum
+
+`SemanticModel` gained a plural `dateTables: DateTableDefinition[]` field —
+a Date Table is an explicit, learner-driven marking
+(`runtime/dateTable/dateTableRuntime.ts`'s `markDateTable`/
+`unmarkDateTable`, validate-then-apply exactly like `createRelationship`
+above), never inferred from a column's data type. `hydrateSemanticModel()`
+defaults it to `[]` for pre-Sprint-10 models, and `removeTable()` also
+drops a removed table's `DateTableDefinition` so no dangling metadata can
+survive. See [`docs/DATE_TABLES.md`](./DATE_TABLES.md).
+
 ## Known limitations
 
 - Only `one-to-many` cardinality and single-direction cross-filtering are

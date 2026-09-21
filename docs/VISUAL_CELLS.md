@@ -1,4 +1,4 @@
-# Visual Cells (Sprint 7 + Sprint 8 + Sprint 9)
+# Visual Cells (Sprint 7 + Sprint 8 + Sprint 9 + Sprint 10)
 
 Sprint 7 completes the MVP learning loop by adding a bounded visualization
 layer on top of the Sprint 2–6 semantic model / measure / filter-context
@@ -25,6 +25,15 @@ table expression automatically, purely because `evaluateMeasure` is still the
 one and only thing every Visual calls. **Zero lines changed in
 `runtime/visual/*`** — see [`docs/ITERATORS.md`](./ITERATORS.md) "Visual Cell
 integration" and `tests/runtime/visual/iteratorVisual.test.ts`.
+
+**Sprint 10 update:** the same is true of every time-intelligence measure
+(`Revenue LY`, `Revenue PM`, `Revenue YTD`, ...) — a Line Visual axed on
+`Calendar[Month]` with `Total Revenue`/`Revenue LY`/`Revenue YTD` as its
+measures recomputes each series correctly per member, because each member's
+own filter and the measure's internal `CALCULATE`/`DateTableReplace`
+modification compose exactly like Sprint 8's `Spain Revenue` already did.
+**Zero lines changed in `runtime/visual/*`** — see
+[`docs/TIME_INTELLIGENCE.md`](./TIME_INTELLIGENCE.md).
 
 ## Product boundary
 

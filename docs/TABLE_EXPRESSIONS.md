@@ -249,3 +249,15 @@ text — matching the rest of the engine's trace conventions
   `tests/runtime/measure/calculateRetailSample.test.ts`,
   `tests/expression/calculateBinder.test.ts`) pass unchanged, proving the
   refactor didn't regress CALCULATE.
+
+## Sprint 10 addendum
+
+`BoundTableExpression` gained one more variant,
+`BoundTimeIntelligenceTable` (`SAMEPERIODLASTYEAR`/`DATEADD`/
+`PREVIOUSMONTH`/`PREVIOUSYEAR`/`DATESYTD`) — bound and evaluated through
+this same single dispatch, not a second table-expression abstraction. See
+[`docs/TIME_INTELLIGENCE.md`](./TIME_INTELLIGENCE.md) for the full design;
+`EvaluatedTableExpression` also gained an optional `diagnostics` field for
+`DATEADD`'s runtime-only non-contiguous-context check, which no other
+table expression kind needs (every other kind's failures are caught at
+bind time).

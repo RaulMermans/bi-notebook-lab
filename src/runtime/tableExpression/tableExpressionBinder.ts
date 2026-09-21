@@ -5,6 +5,7 @@ import type { Expression, FunctionCallNode } from '../../expression/ast'
 import { diagnostic, type ExpressionDiagnostic } from '../../expression/diagnostics'
 import { bindPredicateExpression, dedupeColumnRefs, describeBoundPredicate } from '../measure/booleanFilter'
 import { resolveTableRef } from '../model/modelRuntime'
+import { bindDateAdd, bindDatesYtd, bindPreviousMonth, bindPreviousYear, bindSamePeriodLastYear } from '../timeIntelligence/timeIntelligenceBinder'
 import type { BoundTableExpression } from './tableExpressionTypes'
 
 export interface TableExpressionBindContext {
@@ -151,12 +152,19 @@ export function bindTableExpression(node: Expression, ctx: TableExpressionBindCo
     if (name === 'FILTER') return bindFilterTable(node, ctx)
     if (name === 'VALUES') return bindColumnTable('ValuesTable', node, ctx)
     if (name === 'DISTINCT') return bindColumnTable('DistinctTable', node, ctx)
+    // Sprint 10 (Classic Time Intelligence, sprint brief §17) — table-returning date functions,
+    // dispatched through this same single binder (sprint brief §14 "no parallel DAX engine").
+    if (name === 'SAMEPERIODLASTYEAR') return bindSamePeriodLastYear(node, ctx)
+    if (name === 'DATEADD') return bindDateAdd(node, ctx)
+    if (name === 'PREVIOUSMONTH') return bindPreviousMonth(node, ctx)
+    if (name === 'PREVIOUSYEAR') return bindPreviousYear(node, ctx)
+    if (name === 'DATESYTD') return bindDatesYtd(node, ctx)
     return {
       diagnostics: [
         diagnostic(
           'error',
           'INVALID_TABLE_EXPRESSION_ARGUMENT',
-          `"${node.name}" does not produce a table. Sprint 9 table expressions are a model table, FILTER(...), VALUES(...) or DISTINCT(...).`,
+          `"${node.name}" does not produce a table. Table expressions are a model table, FILTER(...), VALUES(...), DISTINCT(...), SAMEPERIODLASTYEAR(...), DATEADD(...), PREVIOUSMONTH(...), PREVIOUSYEAR(...) or DATESYTD(...).`,
           node.nameSpan,
         ),
       ],

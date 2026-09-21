@@ -19,6 +19,7 @@ export function createModel(name = 'Untitled Model'): SemanticModel {
     relationships: [],
     calculatedColumns: [],
     measures: [],
+    dateTables: [],
     createdAt: now,
     updatedAt: now,
   }
@@ -26,12 +27,13 @@ export function createModel(name = 'Untitled Model'): SemanticModel {
 
 /**
  * Normalizes a `SemanticModel` loaded from persistence: models saved before
- * Sprint 4 have no `measures` field on disk at all. Always route a persisted
- * model through this before treating it as a real `SemanticModel` — see
- * docs/MEASURES.md "Persistence".
+ * Sprint 4 have no `measures` field on disk at all, and models saved before
+ * Sprint 10 have no `dateTables` field. Always route a persisted model
+ * through this before treating it as a real `SemanticModel` — see
+ * docs/MEASURES.md "Persistence" and docs/DATE_TABLES.md "Persistence".
  */
 export function hydrateSemanticModel(model: SemanticModel): SemanticModel {
-  return { ...model, measures: model.measures ?? [] }
+  return { ...model, measures: model.measures ?? [], dateTables: model.dateTables ?? [] }
 }
 
 function touch(): Pick<SemanticModel, 'updatedAt'> {
@@ -47,7 +49,7 @@ export function addTable(model: SemanticModel, ref: TableRef): SemanticModel {
   return { ...model, tables: [...model.tables, modelTable], ...touch() }
 }
 
-/** Removes a table and any relationships (in either role) or calculated columns that reference it. */
+/** Removes a table and any relationships (in either role), calculated columns or Date Table marking that reference it (docs/DATE_TABLES.md "Table removal cleanup" — no dangling `DateTableDefinition` may survive its `ModelTable`). */
 export function removeTable(model: SemanticModel, modelTableId: string): SemanticModel {
   const table = model.tables.find((t) => t.id === modelTableId)
   if (!table) return model
@@ -59,7 +61,8 @@ export function removeTable(model: SemanticModel, modelTableId: string): Semanti
       !(r.many.datasetId === table.datasetId && r.many.tableId === table.tableId),
   )
   const calculatedColumns = model.calculatedColumns.filter((c) => c.modelTableId !== modelTableId)
-  return { ...model, tables, relationships, calculatedColumns, ...touch() }
+  const dateTables = model.dateTables.filter((dt) => dt.modelTableId !== modelTableId)
+  return { ...model, tables, relationships, calculatedColumns, dateTables, ...touch() }
 }
 
 export function moveTable(model: SemanticModel, modelTableId: string, position: { x: number; y: number }): SemanticModel {
