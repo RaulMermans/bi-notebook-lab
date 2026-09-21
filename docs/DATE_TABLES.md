@@ -213,12 +213,22 @@ for the automated version of this fixture and
   type
 - `tests/persistence/modelStore.test.ts` — legacy hydration round-trip
 
+## Sprint 11 addendum
+
+Date Table marking itself — the domain contract, hydration, validation
+runtime, and UI documented above — is completely unaffected by Sprint 11.
+The only relevant addition is that a Date Table's relationships to a fact
+table can now be role-playing: multiple relationships (e.g.
+`Calendar[Date] → Sales[OrderDate]` and `Calendar[Date] → Sales[ShipDate]`),
+only one active at a time, switchable per calculation with
+`USERELATIONSHIP`. See [`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md)
+"USERELATIONSHIP + Time Intelligence" for the full composition walkthrough
+— nothing about Date Table mechanics changed, so it isn't re-explained
+here.
+
 ## Known limitations
 
 - No fiscal year-end support — Sprint 10 assumes a calendar year ending
   December 31 everywhere (see `docs/TIME_INTELLIGENCE.md`).
-- No role-playing date dimensions, `USERELATIONSHIP`, or multiple active
-  paths to the same fact table from different Date Tables — deferred to a
-  future "Advanced Relationships & Modeling" sprint.
 - No background/periodic revalidation of an existing marking — validity is
   recomputed on render, not on a timer or on every dataset mutation event.

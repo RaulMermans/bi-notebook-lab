@@ -3,7 +3,7 @@ import type { SemanticModel } from '../domain/model'
 import { resolveColumnRef, resolveTableRef } from '../runtime/model/modelRuntime'
 import type { BinaryOperator } from './ast'
 import type { BoundExpression } from './binder'
-import { buildRelatedIndex, resolveManySideColumn, resolveOneSideTable } from './relatedLookup'
+import { buildRelatedIndex, resolveRelatedIndexAndKey } from './relatedLookup'
 import type { RowContext } from './rowContext'
 import { compareScalarValues } from './scalarComparison'
 import type { ExecutionTraceNode } from './trace'
@@ -25,7 +25,7 @@ export interface RowEvaluationError {
 export interface EvalContext {
   model: SemanticModel
   datasets: Record<string, Dataset>
-  relatedIndexCache: Map<string, Map<unknown, Record<string, unknown>>>
+  relatedIndexCache: Map<string, { index: Map<unknown, Record<string, unknown>>; keyColumnName: string }>
 }
 
 export function createEvalContext(model: SemanticModel, datasets: Record<string, Dataset>): EvalContext {
@@ -56,18 +56,24 @@ function columnNameOf(ctx: EvalContext, ref: { datasetId: string; tableId: strin
   return resolveColumnRef(ctx.datasets, ref)?.column.name ?? ref.columnId
 }
 
-function getRelatedIndex(ctx: EvalContext, relationshipId: string): Map<unknown, Record<string, unknown>> | undefined {
-  const cached = ctx.relatedIndexCache.get(relationshipId)
+function getRelatedIndex(
+  ctx: EvalContext,
+  relationshipId: string,
+  targetColumnRef: { datasetId: string; tableId: string; columnId: string },
+): { index: Map<unknown, Record<string, unknown>>; keyColumnName: string } | undefined {
+  const cacheKey = `${relationshipId}:${targetColumnRef.datasetId}:${targetColumnRef.tableId}`
+  const cached = ctx.relatedIndexCache.get(cacheKey)
   if (cached) return cached
 
   const relationship = ctx.model.relationships.find((r) => r.id === relationshipId)
   if (!relationship) return undefined
-  const oneSide = resolveOneSideTable(ctx.datasets, relationship)
-  if (!oneSide) return undefined
+  const resolved = resolveRelatedIndexAndKey(ctx.datasets, relationship, targetColumnRef)
+  if (!resolved) return undefined
 
-  const index = buildRelatedIndex(oneSide.table, oneSide.column)
-  ctx.relatedIndexCache.set(relationshipId, index)
-  return index
+  const index = buildRelatedIndex(resolved.indexTable, resolved.indexColumn)
+  const result = { index, keyColumnName: resolved.keyColumn.name }
+  ctx.relatedIndexCache.set(cacheKey, result)
+  return result
 }
 
 function applyBinary(operator: BinaryOperator, left: number, right: number): number {
@@ -154,8 +160,8 @@ function evaluateNode(node: BoundExpression, rowContext: RowContext, ctx: EvalCo
 
     case 'Related': {
       const relationship = ctx.model.relationships.find((r) => r.id === node.relationshipId)
-      const manyColumn = relationship ? resolveManySideColumn(ctx.datasets, relationship) : undefined
-      if (!relationship || !manyColumn) {
+      const resolved = relationship ? getRelatedIndex(ctx, node.relationshipId, node.targetColumnRef) : undefined
+      if (!relationship || !resolved) {
         return {
           value: null,
           trace: {
@@ -167,9 +173,8 @@ function evaluateNode(node: BoundExpression, rowContext: RowContext, ctx: EvalCo
         }
       }
 
-      const foreignKeyValue = rowContext.row[manyColumn.name] ?? null
-      const index = getRelatedIndex(ctx, node.relationshipId)
-      const matchedRow = foreignKeyValue !== null && index ? index.get(foreignKeyValue) : undefined
+      const foreignKeyValue = rowContext.row[resolved.keyColumnName] ?? null
+      const matchedRow = foreignKeyValue !== null ? resolved.index.get(foreignKeyValue) : undefined
       const value = matchedRow ? (matchedRow[columnNameOf(ctx, node.targetColumnRef)] ?? null) : null
 
       return {

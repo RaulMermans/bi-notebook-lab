@@ -7,6 +7,7 @@ import { resolveRelatedRelationship, type RelatedFailureCode } from '../../expre
 import { resolveLogicalColumn } from '../measure/logicalColumn'
 import { bindTableExpression } from '../tableExpression/tableExpressionBinder'
 import { resolveColumnRef, resolveTableRef } from '../model/modelRuntime'
+import { relationshipEndpoint, relationshipOtherSide } from '../model/relationshipHelpers'
 import type { BoundIteratorCall, BoundIteratorExpression, BoundIteratorSwitchCase, IteratorFunction } from './iteratorTypes'
 
 export interface IteratorBindContext {
@@ -52,6 +53,8 @@ const RELATED_MESSAGES: Record<RelatedFailureCode, (current: string, target: str
     `"${target}" is on the "many" side relative to "${current}" — RELATED can only look up from the many side to the one side.`,
   RELATED_AMBIGUOUS_RELATIONSHIP: (current, target) =>
     `More than one active relationship connects "${current}" to "${target}", so RELATED doesn't know which one to use.`,
+  RELATED_UNSUPPORTED_CARDINALITY: (current, target) =>
+    `"${current}" and "${target}" are connected by a many-to-many relationship — RELATED can't pick a single related row, since neither side is unique.`,
 }
 
 function bindRelatedInRow(node: FunctionCallNode, ctx: RowBindContext): RowBindResult {
@@ -97,8 +100,9 @@ function bindRelatedInRow(node: FunctionCallNode, ctx: RowBindContext): RowBindR
     }
   }
 
-  const manyColumn = resolveColumnRef(ctx.datasets, related.relationship.many)
-  if (!manyColumn) {
+  const currentSideRef = relationshipEndpoint(related.relationship, relationshipOtherSide(related.targetSide))
+  const currentSideColumn = resolveColumnRef(ctx.datasets, currentSideRef)
+  if (!currentSideColumn) {
     return { diagnostics: [diagnostic('error', 'RELATED_NO_RELATIONSHIP', 'The relationship\'s foreign-key column could not be resolved.', node.span)] }
   }
 
@@ -107,7 +111,7 @@ function bindRelatedInRow(node: FunctionCallNode, ctx: RowBindContext): RowBindR
       kind: 'Related',
       relationshipId: related.relationship.id,
       targetColumnRef: { datasetId: targetResolved.dataset.id, tableId: targetResolved.table.id, columnId: column.id },
-      manyColumnName: manyColumn.column.name,
+      manyColumnName: currentSideColumn.column.name,
       targetColumnName: column.name,
       label: `RELATED(${targetResolved.table.name}[${column.name}])`,
       span: node.span,

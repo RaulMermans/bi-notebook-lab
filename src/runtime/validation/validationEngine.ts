@@ -8,7 +8,7 @@ import { computeValidationFingerprint } from './fingerprint'
 import { evaluateMeasureResultRule } from './measureValidation'
 import { computeValidationRun } from './scoring'
 import { evaluateExpressionSemanticRule } from './semanticValidation'
-import { evaluateModelHealthRule, evaluateRelationshipRule, evaluateTablePresenceRule } from './structuralValidation'
+import { evaluateModelHealthRule, evaluateRelationshipConfigRule, evaluateRelationshipRule, evaluateTablePresenceRule } from './structuralValidation'
 import type { RuleEvaluationResult } from './types'
 
 export interface ValidationSnapshot {
@@ -20,6 +20,8 @@ function evaluateRule(rule: ValidationRule, model: SemanticModel, datasets: Reco
   switch (rule.type) {
     case 'relationship':
       return evaluateRelationshipRule(rule, model, datasets)
+    case 'relationship-config':
+      return evaluateRelationshipConfigRule(rule, model, datasets)
     case 'model-health':
       return evaluateModelHealthRule(rule, model, datasets)
     case 'table-present':

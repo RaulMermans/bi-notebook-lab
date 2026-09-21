@@ -447,6 +447,26 @@ this is correct, documented behavior, not a defect (sprint brief §51).
   scenarios end-to-end against the real bundled Retail dataset.
 - `tests/runtime/dateTable/dateMath.test.ts` — date arithmetic.
 
+## Sprint 11 addendum
+
+`USERELATIONSHIP`/`CROSSFILTER` (Sprint 11 — see
+[`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md)) compose with every
+function on this page **with no new implementation**, at a summary level:
+`computeTimeIntelligenceRowIndexes` (`runtime/timeIntelligence/
+timeIntelligenceEvaluator.ts`) only ever reads the *ambient* (outer,
+already-resolved) `ResolvedFilterState` — it has no relationship awareness
+at all, and nothing about it changed in Sprint 11. Because `USERELATIONSHIP`
+and a time-intelligence function like `SAMEPERIODLASTYEAR` are just two
+independent modifiers folded into the same `EffectiveContext` and then
+resolved together in one `resolveFilterContextUnchecked` call, a Date
+Table's shifted row selection simply propagates through whichever
+relationship `USERELATIONSHIP` made effective for that calculation —
+composition falls out of the existing modifier-application architecture for
+free. See [`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md)
+"USERELATIONSHIP + Time Intelligence" for the full walkthrough (the
+canonical `Shipped Revenue LY` example) and
+`tests/runtime/measure/userelationship.test.ts` for the end-to-end proof.
+
 ## Known DAX compatibility limitations
 
 - Calendar-year only — no fiscal year-end argument on `DATESYTD`/`TOTALYTD`.
@@ -459,11 +479,10 @@ this is correct, documented behavior, not a defect (sprint brief §51).
   (`startOfMonth`/`endOfMonth`/`startOfYear`/`endOfYear`) already exists in
   `dateMath.ts`, but no binder/table-expression surface was built for them.
 - `WEEK` is not a supported `DATEADD` interval.
-- No `USERELATIONSHIP`/`CROSSFILTER` — a Date Table only filters through
-  whichever relationship is currently active.
-- No role-playing date dimensions, no calculated tables
-  (`CALENDAR()`/`CALENDARAUTO()`), no "Auto date/time" hidden tables, no
-  date hierarchies.
+- **`USERELATIONSHIP`/`CROSSFILTER` and role-playing date dimensions are
+  now implemented** (Sprint 11) — see "Sprint 11 addendum" below.
+- No calculated tables (`CALENDAR()`/`CALENDARAUTO()`), no "Auto date/time"
+  hidden tables, no date hierarchies.
 - Iterator + time-intelligence composition (`SUMX(SAMEPERIODLASTYEAR(...),
   ...)`) isn't specially tested — it isn't blocked, but it also isn't part
   of the required interoperability surface (CALCULATE, COUNTROWS, visual

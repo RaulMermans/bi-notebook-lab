@@ -110,7 +110,7 @@ describe('measureValidation', () => {
   it('fails a case once the required relationship is disabled', () => {
     const { model, datasets, salesTableId, productRelationshipId, productsDs, salesDs } = buildRetailModel()
     const withMeasures = addRetailFoundationsSolution(model, datasets, salesTableId)
-    const disabled = setRelationshipActive(withMeasures, productRelationshipId, false)
+    const { model: disabled } = setRelationshipActive(withMeasures, productRelationshipId, false)
     const category = productsDs.tables[0].rows[0].Category as string
     const furnitureIds = new Set(productsDs.tables[0].rows.filter((r) => r.Category === category).map((r) => r.ProductID))
     const expectedIfActive = sumRevenue(salesDs.tables[0].rows, (r) => furnitureIds.has(r.ProductID))

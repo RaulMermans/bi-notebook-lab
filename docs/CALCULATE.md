@@ -124,10 +124,13 @@ Each filter argument is bound as one of:
 | `ALL(Table[Column])` | `RemoveColumns` (ALL ≈ remove filters, sprint brief §26) |
 | `ALL(Table)` | `RemoveTables` |
 
-`KEEPFILTERS`, `ALLEXCEPT`, `ALLSELECTED`, `CALCULATETABLE`,
-`USERELATIONSHIP` and `CROSSFILTER` are explicitly rejected with
-`UNSUPPORTED_FUNCTION` wherever they appear (as a CALCULATE filter argument
-or standalone) — never silently interpreted as ordinary filtering.
+`KEEPFILTERS`, `ALLEXCEPT`, `ALLSELECTED` and `CALCULATETABLE` are
+explicitly rejected with `UNSUPPORTED_FUNCTION` wherever they appear (as a
+CALCULATE filter argument or standalone) — never silently interpreted as
+ordinary filtering. **`USERELATIONSHIP` and `CROSSFILTER` are now supported**
+(Sprint 11) as a third filter-modifier row in the table above's family —
+see "Sprint 11 addendum" below and
+[`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md) for the full design.
 
 ### Boolean filter argument rules (`src/runtime/measure/booleanFilter.ts`)
 
@@ -362,6 +365,41 @@ abstraction, not a semantic rewrite — every example on this page and every
 Sprint 8 test still passes unchanged. See
 [`docs/TABLE_EXPRESSIONS.md`](./TABLE_EXPRESSIONS.md) for the full design.
 
+## Sprint 11 addendum: USERELATIONSHIP/CROSSFILTER as a new FilterModifier
+
+`USERELATIONSHIP`/`CROSSFILTER` are now real `CALCULATE` filter modifiers,
+documented in full in [`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md) —
+this section is a concise pointer plus the one CALCULATE-specific
+architectural note.
+
+Both bind to a new `FilterModifier` variant,
+`RelationshipOverrideModifier` (`kind: 'RelationshipOverride'`,
+`src/runtime/measure/contextModifier.ts`), alongside `ReplaceColumnFilter`/
+`PredicateFilter`/`RemoveColumns`/`RemoveTables`/`ClearAllFilters`/
+`DateTableReplace` — the same union every other `CALCULATE` filter argument
+has bound to since Sprint 8. **No new `FilterModifier` dispatch pattern was
+needed**: `applyFilterModifier`'s existing `switch (modifier.kind)` in
+`contextModifier.ts` simply gained one more case, mutating
+`EffectiveContext`'s new `relationshipState` field exactly the way every
+other case already mutates `columnFilters`/`tableSelections`. Modifier
+ordering, nested-`CALCULATE` scoping (`cloneEffectiveContext` now also
+deep-clones `relationshipState`), and the context-safe fresh-cache rule all
+apply to `RelationshipOverride` unchanged — no relationship-specific
+exception to any of this document's existing rules was required.
+
+New diagnostic codes: `USERELATIONSHIP_COLUMN_REQUIRED`,
+`USERELATIONSHIP_INVALID_ARITY`, `USERELATIONSHIP_RELATIONSHIP_NOT_FOUND`,
+`USERELATIONSHIP_AMBIGUOUS_RELATIONSHIP`, `USERELATIONSHIP_INVALID_CONTEXT`,
+`CROSSFILTER_COLUMN_REQUIRED`, `CROSSFILTER_INVALID_ARITY`,
+`CROSSFILTER_RELATIONSHIP_NOT_FOUND`, `CROSSFILTER_AMBIGUOUS_RELATIONSHIP`,
+`CROSSFILTER_INVALID_DIRECTION`,
+`CROSSFILTER_DIRECTION_INVALID_FOR_CARDINALITY`,
+`CROSSFILTER_INVALID_CONTEXT`. See
+[`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md) for the full binding
+rules, the conflict-scope (sibling-relationship suppression) design, the
+`USERELATIONSHIP` + `SAMEPERIODLASTYEAR` composition walkthrough, and known
+boundaries.
+
 ## Execution trace (`src/expression/trace.ts`)
 
 Five new `TraceNodeKind`s, all real runtime output (never reconstructed from
@@ -493,9 +531,11 @@ everything or nothing.
   predicate selection**: removing any one of several columns a compound
   direct filter (`Price > 50 && Category = "X"`) referenced removes the
   *whole* resulting table selection, not just that column's contribution.
-- **No `KEEPFILTERS`, `ALLEXCEPT`, `ALLSELECTED`, `CALCULATETABLE`,
-  `USERELATIONSHIP`, `CROSSFILTER`** — explicitly rejected with
-  `UNSUPPORTED_FUNCTION`, never silently misinterpreted.
+- **No `KEEPFILTERS`, `ALLEXCEPT`, `ALLSELECTED`, `CALCULATETABLE`** —
+  explicitly rejected with `UNSUPPORTED_FUNCTION`, never silently
+  misinterpreted. **`USERELATIONSHIP`/`CROSSFILTER` are now implemented**
+  (Sprint 11) — see "Sprint 11 addendum" below and
+  [`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md).
 - **Blank comparison semantics are simplified** — see "Boolean runtime"
   above; real DAX's blank-coercion rules (e.g. blank treated as 0 in some
   arithmetic contexts) are not replicated.
@@ -514,10 +554,13 @@ everything or nothing.
   [`docs/TIME_INTELLIGENCE.md`](./TIME_INTELLIGENCE.md), including the new
   `DateTableReplace` `FilterModifier` variant this section's "Modifier
   ordering"/"Table-wide vs. column-scoped replacement" rules extend to.
+- **Generic relationships (1:1, *:*, bidirectional cross-filter) and
+  `USERELATIONSHIP`/`CROSSFILTER` are now implemented** (Sprint 11) — see
+  [`docs/ADVANCED_RELATIONSHIPS.md`](./ADVANCED_RELATIONSHIPS.md) and
+  [`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md).
 - **Calculated tables, calendar-based (Auto date/time) time intelligence,
-  many-to-many and bidirectional relationships,
-  `ALLSELECTED`/`ALLEXCEPT`/`CALCULATETABLE`/`USERELATIONSHIP`/
-  `CROSSFILTER`, `EARLIER`/`EARLIEST` and nested iterator row-context stacks
-  remain out of scope** — Sprint 11+ territory, not started here (see
-  [`docs/ITERATORS.md`](./ITERATORS.md) "Known limitations" for the
-  iterator-specific boundaries, e.g. `SUMX(table, CALCULATE(...))`).
+  `ALLSELECTED`/`ALLEXCEPT`/`CALCULATETABLE`, `TREATAS`, `EARLIER`/
+  `EARLIEST` and nested iterator row-context stacks remain out of scope** —
+  not started here (see [`docs/ITERATORS.md`](./ITERATORS.md) "Known
+  limitations" for the iterator-specific boundaries, e.g.
+  `SUMX(table, CALCULATE(...))`).

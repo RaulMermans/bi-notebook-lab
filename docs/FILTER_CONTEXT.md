@@ -90,35 +90,95 @@ A filter on `Sales[Quantity]` constrains `Sales` directly; a filter on
 `Customers[Country]` constrains `Customers` directly. Neither yet affects
 any other table — that's step 3.
 
-### 3. Propagate through active relationships, one → many, to a fixed point
+### 3. Propagate through effective directed relationship edges to a fixed point
 
-For every **active** relationship whose "1" side already has a
-constrained row selection, `propagate()`:
+For every effective directed propagation edge (Sprint 4-9: always exactly
+the "1" side → "many" side of an active relationship; Sprint 11 generalizes
+this — see "Sprint 11 addendum" below), `propagate()`:
 
-1. Collects the set of key values still visible on the "1" side
-   (`allowedKeysFromOneSide`).
-2. Looks up the "many" side's matching row indices via a
-   `foreign key value -> row indices` index built once per relationship
-   per evaluation (`buildManySideKeyIndex` — an evaluation-local cache,
-   the same pattern as Sprint 3's `RELATED` index).
-3. Intersects that with the many-side's current selection.
+1. Collects the set of key values still visible on the edge's source side
+   (`allowedKeysFromSource`).
+2. Looks up the edge's target side's matching row indices via a
+   `foreign key value -> row indices` index built once per edge per
+   evaluation (`buildTargetKeyIndex` — an evaluation-local cache, the same
+   pattern as Sprint 3's `RELATED` index).
+3. Intersects that with the target side's current selection.
 
-This repeats in a loop (bounded by `relationships.length + 1` passes)
-until nothing changes, so a transitive chain (`Region → Customers →
+This repeats in a loop (bounded by `tables.length + edges.length + 1`
+passes) until nothing changes, so a transitive chain (`Region → Customers →
 Sales`) resolves without hardcoding hop counts — each pass can pick up a
 newly-constrained table from the previous pass.
 
-**Direction is one-way by construction**: the loop only ever reads the
-"1" side's selection to constrain the "many" side. A filter on `Sales`
-(the many side of every relationship in a star schema) is never used to
-constrain `Customers`/`Products`/`Calendar` — real Power BI single-
-direction filtering, not a simplification bug.
+**Direction is edge-directed by construction**: the loop only ever reads an
+edge's source-side selection to constrain its target side. Through Sprint 9,
+every relationship contributed exactly one edge (the "1" side → the "many"
+side, real Power BI single-direction filtering), so a filter on `Sales`
+(the many side of every relationship in a star schema) was never used to
+constrain `Customers`/`Products`/`Calendar`. Sprint 11 lets a relationship
+contribute a second, opposite-direction edge when it's genuinely
+bidirectional — see below.
 
-**Inactive relationships are skipped entirely** — `activeRelationships()`
-(shared with `graphAnalysis.ts`) filters them out before propagation ever
-sees them, so disabling a relationship on the model canvas immediately
+**Inactive relationships are skipped entirely** — `relationshipPropagationEdges`
+only derives edges for relationships that are effectively active (folding
+in any runtime `USERELATIONSHIP`/`CROSSFILTER` override — see "Sprint 11
+addendum"), so disabling a relationship on the model canvas immediately
 stops it from propagating, and re-enabling it immediately restores
 propagation, with no measure-side changes needed.
+
+## Sprint 11 addendum
+
+Filter propagation is no longer a hardcoded "1 → many" step per active
+relationship. `runtime/model/relationshipHelpers.ts#relationshipPropagationEdges(model,
+relationshipState?)` derives every effective directed
+`RelationshipPropagationEdge` (`{relationshipId, sourceModelTableId,
+sourceColumn, targetModelTableId, targetColumn, direction}`) from the
+model's relationships, folding in any runtime `USERELATIONSHIP`/
+`CROSSFILTER` override — an activated relationship contributes edges even
+if `active: false` on the model; a suppressed one contributes none even if
+`active: true`; a direction override replaces the persisted
+`crossFilterDirection` for edge derivation. `propagate()` (this file) walks
+*this same edge list* to a fixed point — `1 → *`, `* → 1`, `1 ↔ 1` and
+`* → *` all reduce to the identical "key membership" step, so there is no
+cardinality-specific propagation algorithm here to maintain.
+
+**`AMBIGUOUS_FILTER_PATH` replaces `ACTIVE_CYCLE`/`AMBIGUOUS_PATH`.** The
+old `ACTIVE_CYCLE` diagnostic ran simple directed-cycle detection on the
+`many → one` graph — retired entirely, not generalized, because a legal
+bidirectional relationship (`A ↔ B`) is, by construction, a 2-node directed
+cycle once bidirectional cross-filter exists, so cycle detection would flag
+a completely legitimate model. `checkFilterGraphValidity` (this file) now
+only checks for `AMBIGUOUS_FILTER_PATH` — more than one distinct directed
+propagation path between an ordered table pair — to build
+`FILTER_GRAPH_INVALID`. See
+[`ADVANCED_RELATIONSHIPS.md`](./ADVANCED_RELATIONSHIPS.md) "Ambiguity
+detection" for the full redesign and worked examples.
+
+**`resolveFilterContext`/`resolveFilterContextUnchecked` gained an optional
+`relationshipState` parameter:**
+
+```ts
+resolveFilterContextUnchecked(
+  model, datasets, filterContext,
+  tableSelections?: Map<string, Set<number>>,
+  relationshipState?: EffectiveRelationshipState,
+): ResolvedFilterState
+
+resolveFilterContext(
+  model, datasets, filterContext,
+  tableSelections?: Map<string, Set<number>>,
+  relationshipState?: EffectiveRelationshipState,
+): ResolvedFilterState
+```
+
+`EffectiveRelationshipState` (`activatedRelationshipIds`/
+`suppressedRelationshipIds`/`directionOverrides`) is how a `CALCULATE`
+call's `USERELATIONSHIP`/`CROSSFILTER` modifiers reach propagation — see
+[`CALCULATE.md`](./CALCULATE.md) and
+[`USERELATIONSHIP.md`](./USERELATIONSHIP.md) for the full
+`RelationshipOverrideModifier`/`EffectiveContext` architecture this plugs
+into. `ResolvedFilterState` also gained an optional
+`relationshipOverrides: { activated: string[]; suppressed: string[] }`
+field, surfaced for the Context Explorer, never inferred from source text.
 
 ## Relationship indexing / performance
 
@@ -204,9 +264,11 @@ diagnostic surface, Visual Cells are notebook output — see
   runtime layer (`contextModifier.ts`/`booleanFilter.ts`) that produces a
   plain `ColumnFilter[]` (plus an internal table-selection seed) by the time
   it reaches this module — see [`CALCULATE.md`](./CALCULATE.md).
-- Ambiguous or cyclic active relationship graphs fail the *entire*
-  evaluation rather than degrading gracefully for the unaffected part of
-  the model — intentional per spec, but means one bad relationship can
-  block every measure in a larger model until fixed.
+- A model whose effective graph has an `AMBIGUOUS_FILTER_PATH` fails the
+  *entire* evaluation rather than degrading gracefully for the unaffected
+  part of the model — intentional per spec, but means one bad relationship
+  can block every measure in a larger model until fixed. (Sprint 11 retired
+  the old `ACTIVE_CYCLE` diagnostic — see "Sprint 11 addendum" above — this
+  point still applies to its `AMBIGUOUS_FILTER_PATH` replacement.)
 - `MIN`/`MAX`-side type restrictions and `DISTINCTCOUNT`'s blank handling
   are documented in `MEASURES.md`, not repeated here.

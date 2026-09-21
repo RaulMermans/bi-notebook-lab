@@ -136,13 +136,13 @@ describe('Retail sample calculated columns', () => {
 
     const { setRelationshipActive } = await import('../../../src/runtime/model/modelRuntime')
     const relationshipId = created.model.relationships[0].id
-    const disabledModel: SemanticModel = setRelationshipActive(created.model, relationshipId, false)
+    const { model: disabledModel } = setRelationshipActive(created.model, relationshipId, false)
 
     const { evaluateCalculatedColumn } = await import('../../../src/runtime/calculatedColumn/calculatedColumnRuntime')
     const failedExecution = evaluateCalculatedColumn(disabledModel, datasets, created.calculatedColumn!.id)
     expect(failedExecution?.columnDiagnostics).toEqual([expect.objectContaining({ code: 'RELATED_INACTIVE_RELATIONSHIP' })])
 
-    const reEnabledModel = setRelationshipActive(disabledModel, relationshipId, true)
+    const { model: reEnabledModel } = setRelationshipActive(disabledModel, relationshipId, true)
     const recoveredExecution = evaluateCalculatedColumn(reEnabledModel, datasets, created.calculatedColumn!.id)
     expect(recoveredExecution?.columnDiagnostics).toEqual([])
     expect(recoveredExecution?.values.length).toBeGreaterThan(0)

@@ -21,14 +21,27 @@ export interface ModelTable {
   }
 }
 
-export type RelationshipCardinality = 'one-to-many'
-export type CrossFilterDirection = 'single'
+export type RelationshipCardinality = 'one-to-many' | 'one-to-one' | 'many-to-many'
+export type RelationshipSide = 'left' | 'right'
+export type CrossFilterDirection = 'left-to-right' | 'right-to-left' | 'both'
 
+/**
+ * Sprint 11's canonical relationship shape — generic across 1:*, 1:1 and *:*,
+ * single-direction and bidirectional cross-filter, active and inactive. No
+ * runtime code may read fields named `one`/`many`; see
+ * `runtime/model/relationshipHelpers.ts` for the orientation helpers every
+ * consumer goes through instead. Models persisted before Sprint 11 (which
+ * stored `{ one, many, cardinality: 'one-to-many', crossFilterDirection:
+ * 'single' }`) are converted to this shape by `hydrateSemanticModel`
+ * (docs/ADVANCED_RELATIONSHIPS.md "Legacy hydration") — never at rest.
+ */
 export interface Relationship {
   id: string
-  one: ColumnRef
-  many: ColumnRef
+  left: ColumnRef
+  right: ColumnRef
   cardinality: RelationshipCardinality
+  /** Which side is the unique "1" side — required for `one-to-many`, absent for `one-to-one`/`many-to-many` (docs/ADVANCED_RELATIONSHIPS.md). */
+  oneSide?: RelationshipSide
   crossFilterDirection: CrossFilterDirection
   active: boolean
   createdAt: string
@@ -114,16 +127,39 @@ export type RelationshipDiagnosticCode =
   | 'SELF_RELATIONSHIP'
   | 'COLUMN_TYPE_MISMATCH'
   | 'ONE_SIDE_NOT_UNIQUE'
+  | 'LEFT_SIDE_NOT_UNIQUE'
+  | 'RIGHT_SIDE_NOT_UNIQUE'
+  | 'INVALID_CARDINALITY'
+  | 'INVALID_CROSS_FILTER_DIRECTION'
+  | 'ONE_TO_ONE_REQUIRES_BOTH'
+  | 'MANY_TO_MANY_RELATIONSHIP'
+  | 'BIDIRECTIONAL_RELATIONSHIP'
   | 'DUPLICATE_RELATIONSHIP'
   | 'UNMATCHED_FOREIGN_KEYS'
+  | 'ONE_TO_ONE_COVERAGE'
+  | 'RELATIONSHIP_CREATES_AMBIGUOUS_PATH'
 
+/**
+ * Sprint 11 (§15-18): `ACTIVE_CYCLE` is retired — a legal bidirectional
+ * relationship is a 2-node directed cycle, so simple directed-cycle
+ * detection is the wrong tool once bidirectional cross-filter exists. The
+ * only graph-invalidating condition now is `AMBIGUOUS_FILTER_PATH` (more
+ * than one distinct directed propagation path between an ordered table
+ * pair) — see `runtime/model/graphAnalysis.ts` and docs/ADVANCED_RELATIONSHIPS.md
+ * "Ambiguity detection".
+ */
 export type ModelDiagnosticCode =
-  | 'ACTIVE_CYCLE'
-  | 'AMBIGUOUS_PATH'
+  | 'AMBIGUOUS_FILTER_PATH'
+  | 'PROPAGATION_DID_NOT_CONVERGE'
   | 'ISOLATED_TABLE'
   | 'STAR_SCHEMA_VALID'
   | 'MULTIPLE_FACT_TABLES'
   | 'DIMENSION_ON_MANY_SIDE'
+  | 'MULTIPLE_RELATIONSHIPS_BETWEEN_TABLES'
+  | 'INACTIVE_RELATIONSHIP'
+  | 'ROLE_PLAYING_RELATIONSHIP_PATTERN'
+  | 'BIDIRECTIONAL_FILTERING_WARNING'
+  | 'MANY_TO_MANY_WARNING'
   | RelationshipDiagnosticCode
 
 export interface RelationshipDiagnostic {

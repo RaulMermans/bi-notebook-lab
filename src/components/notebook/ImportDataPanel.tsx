@@ -7,6 +7,7 @@ import {
   isCsvFile,
   isXlsxFile,
   listWorkbookSheets,
+  loadSampleRelationshipLabDataset,
   loadSampleRetailDataset,
 } from '../../runtime/data/dataRuntime'
 
@@ -112,6 +113,21 @@ export function ImportDataPanel({ onImportDataset, compact = false }: ImportData
     }
   }
 
+  async function handleLoadRelationshipLab() {
+    setBusy(true)
+    setError(null)
+    try {
+      const datasets = loadSampleRelationshipLabDataset()
+      for (const dataset of datasets) {
+        await onImportDataset(dataset)
+      }
+    } catch (err) {
+      reportError(err)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className={`import-panel ${compact ? 'import-panel--compact' : ''}`}>
       <div
@@ -149,6 +165,9 @@ export function ImportDataPanel({ onImportDataset, compact = false }: ImportData
         <p>Try a sample dataset</p>
         <button type="button" className="secondary-button" onClick={handleLoadSample} disabled={busy}>
           Load Retail Dataset
+        </button>
+        <button type="button" className="secondary-button" onClick={handleLoadRelationshipLab} disabled={busy}>
+          Load Relationship Lab Dataset
         </button>
       </div>
 

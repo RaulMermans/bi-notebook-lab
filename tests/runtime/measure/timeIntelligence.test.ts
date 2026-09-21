@@ -393,13 +393,13 @@ describe('Sprint 10 — Classic Time Intelligence', () => {
       ],
     }
 
-    const inactiveModel = setRelationshipActive(withM.model, relationshipId, false)
+    const { model: inactiveModel } = setRelationshipActive(withM.model, relationshipId, false)
     const totalUnderInactive = evaluateMeasure(inactiveModel, datasets, measureId(inactiveModel, 'Total Revenue'), context).value
     const lyUnderInactive = evaluateMeasure(inactiveModel, datasets, measureId(inactiveModel, 'Revenue LY'), context).value
     expect(lyUnderInactive).toBe(totalUnderInactive) // Calendar filtering (original or time-shifted) no longer reaches Sales at all
     expect(lyUnderInactive).toBeCloseTo(1540, 6) // grand total, fully unfiltered
 
-    const reactivatedModel = setRelationshipActive(inactiveModel, relationshipId, true)
+    const { model: reactivatedModel } = setRelationshipActive(inactiveModel, relationshipId, true)
     const lyAfterReactivation = evaluateMeasure(reactivatedModel, datasets, measureId(reactivatedModel, 'Revenue LY'), context).value
     expect(lyAfterReactivation).toBeCloseTo(300, 6) // recovers exactly the §63 result
   })

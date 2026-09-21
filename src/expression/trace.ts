@@ -37,6 +37,10 @@ export type TraceNodeKind =
   | 'time-intelligence'
   | 'date-shift'
   | 'date-period'
+  // Sprint 11 (Advanced Relationships) — see docs/USERELATIONSHIP.md "Execution trace".
+  | 'relationship-override'
+  | 'userelationship'
+  | 'crossfilter'
 
 export interface ExecutionTraceNode {
   kind: TraceNodeKind

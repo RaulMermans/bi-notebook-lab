@@ -1,6 +1,7 @@
 import type { Dataset } from '../../domain/data'
 import type {
   ContextFilterSummary,
+  ContextRelationshipPropagationEntry,
   ContextRelationshipState,
   ContextTablePropagationSource,
   ContextTableState,
@@ -34,25 +35,20 @@ export function buildTableStates(model: SemanticModel, state: ResolvedFilterStat
     directByTable.set(summary.modelTableId, list)
   }
 
-  const propagationByManyTable = new Map<string, ContextTablePropagationSource[]>()
+  const propagationByTargetTable = new Map<string, ContextTablePropagationSource[]>()
   for (const step of state.propagationSteps) {
-    const relationship = model.relationships.find((r) => r.id === step.relationshipId)
-    if (!relationship) continue
-    const oneModelTable = modelTableFor(model, relationship.one)
-    const manyModelTable = modelTableFor(model, relationship.many)
-    if (!oneModelTable || !manyModelTable) continue
-
-    const list = propagationByManyTable.get(manyModelTable.id) ?? []
+    const list = propagationByTargetTable.get(step.targetModelTableId) ?? []
     list.push({
       relationshipId: step.relationshipId,
-      oneModelTableId: oneModelTable.id,
-      oneTableName: step.oneTableName,
-      oneKeyColumnName: step.oneKeyColumnName,
-      manyKeyColumnName: step.manyKeyColumnName,
-      manyRowsBefore: step.manyRowsBefore,
-      manyRowsAfter: step.manyRowsAfter,
+      sourceModelTableId: step.sourceModelTableId,
+      sourceTableName: step.sourceTableName,
+      sourceColumnName: step.sourceColumnName,
+      targetColumnName: step.targetColumnName,
+      direction: step.direction,
+      targetRowsBefore: step.targetRowsBefore,
+      targetRowsAfter: step.targetRowsAfter,
     })
-    propagationByManyTable.set(manyModelTable.id, list)
+    propagationByTargetTable.set(step.targetModelTableId, list)
   }
 
   return model.tables.map((table) => {
@@ -60,7 +56,7 @@ export function buildTableStates(model: SemanticModel, state: ResolvedFilterStat
     const totalRows = summary?.totalRows ?? 0
     const visibleRows = summary?.visibleRows ?? totalRows
     const directFilters = directByTable.get(table.id) ?? []
-    const incomingPropagation = propagationByManyTable.get(table.id) ?? []
+    const incomingPropagation = propagationByTargetTable.get(table.id) ?? []
 
     // A CALCULATE `FILTER`/inequality-derived table selection (Sprint 8) narrows `visibleRows`
     // without adding a `ColumnFilter`-shaped `directFilters` entry (docs/CALCULATE.md "Known
@@ -97,39 +93,53 @@ export function buildRelationshipStates(
   datasets: Record<string, Dataset>,
   state: ResolvedFilterState,
 ): ContextRelationshipState[] {
-  const tableSummaryById = new Map(state.tableSummaries.map((t) => [t.modelTableId, t]))
+  const activated = new Set(state.relationshipOverrides?.activated ?? [])
+  const suppressed = new Set(state.relationshipOverrides?.suppressed ?? [])
 
   return model.relationships.flatMap((relationship): ContextRelationshipState[] => {
-    const oneModelTable = modelTableFor(model, relationship.one)
-    const manyModelTable = modelTableFor(model, relationship.many)
-    if (!oneModelTable || !manyModelTable) return []
+    const leftModelTable = modelTableFor(model, relationship.left)
+    const rightModelTable = modelTableFor(model, relationship.right)
+    if (!leftModelTable || !rightModelTable) return []
 
-    const oneResolved = resolveTableRef(datasets, oneModelTable)
-    const manyResolved = resolveTableRef(datasets, manyModelTable)
-    const oneColumn = resolveColumnRef(datasets, relationship.one)
-    const manyColumn = resolveColumnRef(datasets, relationship.many)
+    const leftResolved = resolveTableRef(datasets, leftModelTable)
+    const rightResolved = resolveTableRef(datasets, rightModelTable)
+    const leftColumn = resolveColumnRef(datasets, relationship.left)
+    const rightColumn = resolveColumnRef(datasets, relationship.right)
 
-    const step = state.propagationSteps.find((s) => s.relationshipId === relationship.id)
-    const propagated = step !== undefined
-    const oneSummary = tableSummaryById.get(oneModelTable.id)
+    const propagation: ContextRelationshipPropagationEntry[] = state.propagationSteps
+      .filter((s) => s.relationshipId === relationship.id)
+      .map((s) => ({
+        direction: s.direction,
+        targetModelTableId: s.targetModelTableId,
+        targetRowsBefore: s.targetRowsBefore,
+        targetRowsAfter: s.targetRowsAfter,
+      }))
+
+    const effectiveActive = suppressed.has(relationship.id) ? false : activated.has(relationship.id) ? true : relationship.active
+
+    let overrideReason: ContextRelationshipState['overrideReason']
+    if (suppressed.has(relationship.id) && relationship.active) overrideReason = 'crossfilter-none'
+    else if (suppressed.has(relationship.id)) overrideReason = 'suppressed-by-userelationship'
+    else if (activated.has(relationship.id) && !relationship.active) overrideReason = 'activated-by-userelationship'
+    else if (activated.has(relationship.id)) overrideReason = 'crossfilter-direction-override'
 
     return [
       {
         relationshipId: relationship.id,
-        oneModelTableId: oneModelTable.id,
-        manyModelTableId: manyModelTable.id,
-        oneTableName: oneResolved?.table.name ?? 'Unknown table',
-        manyTableName: manyResolved?.table.name ?? 'Unknown table',
-        oneColumnName: oneColumn?.column.name ?? 'Unknown column',
-        manyColumnName: manyColumn?.column.name ?? 'Unknown column',
+        leftModelTableId: leftModelTable.id,
+        rightModelTableId: rightModelTable.id,
+        leftTableName: leftResolved?.table.name ?? 'Unknown table',
+        rightTableName: rightResolved?.table.name ?? 'Unknown table',
+        leftColumnName: leftColumn?.column.name ?? 'Unknown column',
+        rightColumnName: rightColumn?.column.name ?? 'Unknown column',
+        cardinality: relationship.cardinality,
+        oneSide: relationship.oneSide,
+        crossFilterDirection: relationship.crossFilterDirection,
         active: relationship.active,
-        propagated,
-        state: !relationship.active ? 'inactive' : propagated ? 'propagated' : 'active-no-effect',
-        manyRowsBefore: step?.manyRowsBefore,
-        manyRowsAfter: step?.manyRowsAfter,
-        // The "1" side of a relationship is always unique (enforced by ONE_SIDE_NOT_UNIQUE at
-        // creation — docs/MODEL_RUNTIME.md), so its visible row count IS the distinct allowed-key count.
-        allowedOneSideKeys: oneSummary?.visibleRows,
+        effectiveActive,
+        overrideReason,
+        propagation,
+        state: !effectiveActive ? 'inactive' : propagation.length > 0 ? 'propagated' : 'active-no-effect',
       },
     ]
   })

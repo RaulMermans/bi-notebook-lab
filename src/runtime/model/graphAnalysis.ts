@@ -1,96 +1,13 @@
 import type { Dataset } from '../../domain/data'
 import type { ModelDiagnostic, ModelTable, Relationship, SemanticModel } from '../../domain/model'
-import { detectCycle } from '../../lib/graph/cycle'
+import { findAmbiguousDirectedPairs, relationshipPropagationEdges } from './relationshipHelpers'
 import { resolveTableRef } from './modelRuntime'
+
+export { modelTableFor } from './modelTableLookup'
+import { modelTableFor } from './modelTableLookup'
 
 export function activeRelationships(model: SemanticModel): Relationship[] {
   return model.relationships.filter((r) => r.active)
-}
-
-export function modelTableFor(model: SemanticModel, ref: { datasetId: string; tableId: string }): ModelTable | undefined {
-  return model.tables.find((t) => t.datasetId === ref.datasetId && t.tableId === ref.tableId)
-}
-
-/**
- * Directed edge = active relationship, many → one (a fact-like row "looks
- * up" its dimension). Cycles here mean a lookup chain loops back on itself.
- * Exported so `runtime/measure/filterPropagation.ts` can walk the same graph
- * in the opposite direction (one → many) for filter propagation, rather than
- * building a third adjacency map (docs/FILTER_CONTEXT.md).
- */
-export function directedActiveGraph(model: SemanticModel): Map<string, Set<string>> {
-  const graph = new Map<string, Set<string>>()
-  for (const table of model.tables) graph.set(table.id, new Set())
-
-  for (const relationship of activeRelationships(model)) {
-    const manyTable = modelTableFor(model, relationship.many)
-    const oneTable = modelTableFor(model, relationship.one)
-    if (!manyTable || !oneTable) continue
-    graph.get(manyTable.id)?.add(oneTable.id)
-  }
-  return graph
-}
-
-/**
- * Undirected edge list for path-counting. Ambiguous filter propagation is a
- * property of "how many ways can two tables reach each other", which is
- * inherently undirected (a diamond A→B, A→C, B→C gives B two ways to reach
- * A: directly, and via C).
- */
-export function undirectedActiveEdges(model: SemanticModel): Map<string, Set<string>> {
-  const graph = new Map<string, Set<string>>()
-  for (const table of model.tables) graph.set(table.id, new Set())
-
-  for (const relationship of activeRelationships(model)) {
-    const manyTable = modelTableFor(model, relationship.many)
-    const oneTable = modelTableFor(model, relationship.one)
-    if (!manyTable || !oneTable) continue
-    graph.get(manyTable.id)?.add(oneTable.id)
-    graph.get(oneTable.id)?.add(manyTable.id)
-  }
-  return graph
-}
-
-/**
- * For each connected pair of tables, counts simple paths between them,
- * stopping once 2 are found (the spec only needs ">1", not an exact count).
- */
-function findAmbiguousPairs(graph: Map<string, Set<string>>): [string, string][] {
-  const nodes = [...graph.keys()]
-  const ambiguous: [string, string][] = []
-
-  function countPaths(start: string, end: string): number {
-    let count = 0
-    const visited = new Set<string>([start])
-
-    function walk(node: string) {
-      if (count >= 2) return
-      if (node === end) {
-        count += 1
-        return
-      }
-      for (const neighbor of graph.get(node) ?? []) {
-        if (visited.has(neighbor)) continue
-        visited.add(neighbor)
-        walk(neighbor)
-        visited.delete(neighbor)
-        if (count >= 2) return
-      }
-    }
-
-    walk(start)
-    return count
-  }
-
-  for (let i = 0; i < nodes.length; i += 1) {
-    for (let j = i + 1; j < nodes.length; j += 1) {
-      if (countPaths(nodes[i], nodes[j]) > 1) {
-        ambiguous.push([nodes[i], nodes[j]])
-      }
-    }
-  }
-
-  return ambiguous
 }
 
 function tableLabel(model: SemanticModel, datasets: Record<string, Dataset>, modelTableId: string): string {
@@ -103,10 +20,10 @@ function tableLabel(model: SemanticModel, datasets: Record<string, Dataset>, mod
 function findIsolatedTables(model: SemanticModel): ModelTable[] {
   const touched = new Set<string>()
   for (const relationship of model.relationships) {
-    const manyTable = modelTableFor(model, relationship.many)
-    const oneTable = modelTableFor(model, relationship.one)
-    if (manyTable) touched.add(manyTable.id)
-    if (oneTable) touched.add(oneTable.id)
+    const leftTable = modelTableFor(model, relationship.left)
+    const rightTable = modelTableFor(model, relationship.right)
+    if (leftTable) touched.add(leftTable.id)
+    if (rightTable) touched.add(rightTable.id)
   }
   return model.tables.filter((t) => !touched.has(t.id))
 }
@@ -117,6 +34,14 @@ interface TableRole {
   manySideCount: number
 }
 
+/**
+ * Fact/dimension role inference is scoped to classic `one-to-many`
+ * relationships only (sprint brief §45) — a one-to-one, many-to-many or
+ * bidirectional relationship carries no "1 side"/"many side" role and must
+ * never be counted here, so an advanced model is never misdiagnosed as a
+ * broken star schema just for using a feature the old heuristic didn't
+ * anticipate.
+ */
 function computeTableRoles(model: SemanticModel): TableRole[] {
   const roles = new Map<string, TableRole>()
   for (const table of model.tables) {
@@ -124,8 +49,9 @@ function computeTableRoles(model: SemanticModel): TableRole[] {
   }
 
   for (const relationship of activeRelationships(model)) {
-    const oneTable = modelTableFor(model, relationship.one)
-    const manyTable = modelTableFor(model, relationship.many)
+    if (relationship.cardinality !== 'one-to-many' || !relationship.oneSide) continue
+    const oneTable = modelTableFor(model, relationship.oneSide === 'left' ? relationship.left : relationship.right)
+    const manyTable = modelTableFor(model, relationship.oneSide === 'left' ? relationship.right : relationship.left)
     if (oneTable) roles.get(oneTable.id)!.oneSideCount += 1
     if (manyTable) roles.get(manyTable.id)!.manySideCount += 1
   }
@@ -134,10 +60,12 @@ function computeTableRoles(model: SemanticModel): TableRole[] {
 }
 
 /**
- * Infers fact-like vs dimension-like tables purely from relationship
- * topology (never from table names). A table that is only ever the "many"
- * side is fact-like; one that is only ever the "1" side is dimension-like;
- * a table that plays both roles is flagged for review.
+ * Infers fact-like vs dimension-like tables purely from one-to-many
+ * relationship topology (never from table names, never from one-to-one or
+ * many-to-many relationships — see `computeTableRoles`). A table that is
+ * only ever the "many" side is fact-like; one that is only ever the "1"
+ * side is dimension-like; a table that plays both roles is flagged for
+ * review.
  */
 export function inferFactDimensionRoles(model: SemanticModel): {
   factLike: string[]
@@ -149,6 +77,21 @@ export function inferFactDimensionRoles(model: SemanticModel): {
   const dimensionLike = roles.filter((r) => r.oneSideCount > 0 && r.manySideCount === 0).map((r) => r.modelTableId)
   const mixedRole = roles.filter((r) => r.oneSideCount > 0 && r.manySideCount > 0).map((r) => r.modelTableId)
   return { factLike, dimensionLike, mixedRole }
+}
+
+/** All relationships (active + inactive) connecting the same pair of endpoint tables, grouped by an order-independent table-pair key. */
+function relationshipsByTablePair(model: SemanticModel): Map<string, Relationship[]> {
+  const groups = new Map<string, Relationship[]>()
+  for (const relationship of model.relationships) {
+    const leftTable = modelTableFor(model, relationship.left)
+    const rightTable = modelTableFor(model, relationship.right)
+    if (!leftTable || !rightTable) continue
+    const key = [leftTable.id, rightTable.id].sort().join(':')
+    const list = groups.get(key) ?? []
+    list.push(relationship)
+    groups.set(key, list)
+  }
+  return groups
 }
 
 export function validateModel(model: SemanticModel, datasets: Record<string, Dataset>): ModelDiagnostic[] {
@@ -165,23 +108,14 @@ export function validateModel(model: SemanticModel, datasets: Record<string, Dat
     })
   }
 
-  const cycle = detectCycle(directedActiveGraph(model))
-  if (cycle.found) {
+  const edges = relationshipPropagationEdges(model)
+  const ambiguousPairs = findAmbiguousDirectedPairs(edges, model.tables.map((t) => t.id))
+  for (const [source, target] of ambiguousPairs) {
     diagnostics.push({
       severity: 'error',
-      code: 'ACTIVE_CYCLE',
-      message: `Active relationships form a cycle: ${cycle.path.map(label).join(' → ')}. This would make filter propagation ambiguous.`,
-      details: { path: cycle.path },
-    })
-  }
-
-  const ambiguousPairs = findAmbiguousPairs(undirectedActiveEdges(model))
-  for (const [a, b] of ambiguousPairs) {
-    diagnostics.push({
-      severity: 'warning',
-      code: 'AMBIGUOUS_PATH',
-      message: `More than one active relationship path connects "${label(a)}" and "${label(b)}". Filter propagation between them would be ambiguous.`,
-      details: { tableA: a, tableB: b },
+      code: 'AMBIGUOUS_FILTER_PATH',
+      message: `More than one active relationship path can propagate a filter from "${label(source)}" to "${label(target)}". Filter propagation between them would be ambiguous — deactivate or remove one of the competing relationships.`,
+      details: { source, target },
     })
   }
 
@@ -199,7 +133,7 @@ export function validateModel(model: SemanticModel, datasets: Record<string, Dat
     diagnostics.push({
       severity: 'warning',
       code: 'MULTIPLE_FACT_TABLES',
-      message: `Multiple tables (${factLike.map(label).join(', ')}) are only ever on the "many" side. Verify this is intentional rather than a modeling mistake.`,
+      message: `Multiple tables (${factLike.map(label).join(', ')}) are only ever on the "many" side of a one-to-many relationship. Verify this is intentional rather than a modeling mistake.`,
       details: { factLike },
     })
   }
@@ -208,9 +142,58 @@ export function validateModel(model: SemanticModel, datasets: Record<string, Dat
     diagnostics.push({
       severity: 'warning',
       code: 'DIMENSION_ON_MANY_SIDE',
-      message: `"${label(modelTableId)}" is the "1" side in some relationships but the "many" side in others. Dimension tables usually stay on the "1" side — check the relationship direction.`,
+      message: `"${label(modelTableId)}" is the "1" side in some one-to-many relationships but the "many" side in others. Dimension tables usually stay on the "1" side — check the relationship direction.`,
       details: { modelTableId },
     })
+  }
+
+  for (const relationship of model.relationships) {
+    if (relationship.crossFilterDirection === 'both' && relationship.cardinality !== 'one-to-one') {
+      diagnostics.push({
+        severity: 'warning',
+        code: 'BIDIRECTIONAL_FILTERING_WARNING',
+        message: `"${label(modelTableFor(model, relationship.left)?.id ?? '')}" ↔ "${label(modelTableFor(model, relationship.right)?.id ?? '')}" filters in both directions. This is a legitimate Power BI feature, but it can make filter propagation harder to predict — understand why before relying on it.`,
+        details: { relationshipId: relationship.id },
+      })
+    }
+    if (relationship.cardinality === 'many-to-many') {
+      diagnostics.push({
+        severity: 'warning',
+        code: 'MANY_TO_MANY_WARNING',
+        message: `The relationship between "${label(modelTableFor(model, relationship.left)?.id ?? '')}" and "${label(modelTableFor(model, relationship.right)?.id ?? '')}" is many-to-many — neither side is guaranteed unique, so treat aggregated results carefully.`,
+        details: { relationshipId: relationship.id },
+      })
+    }
+    if (!relationship.active) {
+      diagnostics.push({
+        severity: 'info',
+        code: 'INACTIVE_RELATIONSHIP',
+        message: `The relationship between "${label(modelTableFor(model, relationship.left)?.id ?? '')}" and "${label(modelTableFor(model, relationship.right)?.id ?? '')}" is inactive — it won't propagate filters unless a measure activates it with USERELATIONSHIP.`,
+        details: { relationshipId: relationship.id },
+      })
+    }
+  }
+
+  for (const [, relationships] of relationshipsByTablePair(model)) {
+    if (relationships.length < 2) continue
+    const leftTable = modelTableFor(model, relationships[0].left)
+    const rightTable = modelTableFor(model, relationships[0].right)
+    diagnostics.push({
+      severity: 'info',
+      code: 'MULTIPLE_RELATIONSHIPS_BETWEEN_TABLES',
+      message: `${relationships.length} relationships connect "${label(leftTable?.id ?? '')}" and "${label(rightTable?.id ?? '')}". Only one can be active at a time without creating an ambiguous filter path.`,
+      details: { relationshipIds: relationships.map((r) => r.id) },
+    })
+
+    const activeCount = relationships.filter((r) => r.active).length
+    if (activeCount === 1 && relationships.length - activeCount >= 1) {
+      diagnostics.push({
+        severity: 'info',
+        code: 'ROLE_PLAYING_RELATIONSHIP_PATTERN',
+        message: `"${label(leftTable?.id ?? '')}" plays multiple roles for "${label(rightTable?.id ?? '')}" (e.g. Order Date vs. Ship Date) — one relationship is active, the rest are available via USERELATIONSHIP.`,
+        details: { relationshipIds: relationships.map((r) => r.id) },
+      })
+    }
   }
 
   return diagnostics

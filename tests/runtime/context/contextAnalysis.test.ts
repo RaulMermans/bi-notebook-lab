@@ -44,13 +44,13 @@ describe('analyzeMeasureContext', () => {
     const sales = analysis.tables!.find((t) => t.modelTableId === salesTableId)!
     expect(sales.filterState).toBe('propagated')
     expect(sales.incomingPropagation).toHaveLength(1)
-    expect(sales.incomingPropagation[0].oneTableName).toBe('Customers')
+    expect(sales.incomingPropagation[0].sourceTableName).toBe('Customers')
 
-    const relationship = analysis.relationships!.find((r) => r.oneModelTableId === customersTableId)!
+    const relationship = analysis.relationships!.find((r) => r.leftModelTableId === customersTableId)!
     expect(relationship.state).toBe('propagated')
-    expect(relationship.manyRowsBefore).toBe(5)
-    expect(relationship.manyRowsAfter).toBe(3)
-    expect(relationship.allowedOneSideKeys).toBe(2)
+    expect(relationship.propagation).toHaveLength(1)
+    expect(relationship.propagation[0].targetRowsBefore).toBe(5)
+    expect(relationship.propagation[0].targetRowsAfter).toBe(3)
   })
 
   it('two dimension filters both propagate into Sales (multiple filter paths)', () => {
@@ -68,7 +68,7 @@ describe('analyzeMeasureContext', () => {
     expect(analysis.current.value).toBe(150) // orders 1, 3
     const sales = analysis.tables!.find((t) => t.modelTableId === salesTableId)!
     expect(sales.filterState).toBe('propagated')
-    expect(sales.incomingPropagation.map((p) => p.oneTableName).sort()).toEqual(['Customers', 'Products'])
+    expect(sales.incomingPropagation.map((p) => p.sourceTableName).sort()).toEqual(['Customers', 'Products'])
   })
 
   it('propagates transitively through Region -> Customers -> Sales', () => {
@@ -89,14 +89,13 @@ describe('analyzeMeasureContext', () => {
 
   it('an inactive relationship does not propagate, and the edge is marked INACTIVE', () => {
     const { model, datasets, measureId, salesTableId, productRelationshipId, categoryColumn } = buildStarSchemaFixture()
-    const disabled = setRelationshipActive(model, productRelationshipId, false)
+    const { model: disabled } = setRelationshipActive(model, productRelationshipId, false)
 
     const filterContext = {
       filters: [{ column: { datasetId: 'products-ds', tableId: 'products-table', columnId: categoryColumn.id }, operator: 'equals' as const, values: ['Furniture'] }],
     }
 
     const analysis = analyzeMeasureContext({ model, datasets: datasets, measureId, filterContext })
-    void disabled
 
     const analysisWithDisabled = analyzeMeasureContext({ model: disabled, datasets, measureId, filterContext })
     expect(analysisWithDisabled.current.value).toBe(460) // unaffected
@@ -104,7 +103,7 @@ describe('analyzeMeasureContext', () => {
     const relationship = analysisWithDisabled.relationships!.find((r) => r.relationshipId === productRelationshipId)!
     expect(relationship.active).toBe(false)
     expect(relationship.state).toBe('inactive')
-    expect(relationship.propagated).toBe(false)
+    expect(relationship.propagation).toHaveLength(0)
 
     const sales = analysisWithDisabled.tables!.find((t) => t.modelTableId === salesTableId)!
     expect(sales.incomingPropagation.some((p) => p.relationshipId === productRelationshipId)).toBe(false)
@@ -113,7 +112,7 @@ describe('analyzeMeasureContext', () => {
     expect(analysis.relationships!.find((r) => r.relationshipId === productRelationshipId)!.active).toBe(true)
   })
 
-  it('fails closed with an `invalid` state when the active relationship graph is cyclic', () => {
+  it('a directed cycle among active relationships is legal (ACTIVE_CYCLE is retired, sprint brief §15) — does not fail closed', () => {
     const { model, datasets, measureId } = buildStarSchemaFixture()
     const forcedCycle: SemanticModel = {
       ...model,
@@ -121,10 +120,11 @@ describe('analyzeMeasureContext', () => {
         ...model.relationships,
         {
           id: 'forced-cycle',
-          one: { datasetId: 'sales-ds', tableId: 'sales-table', columnId: 'sales-orderid' },
-          many: { datasetId: 'region-ds', tableId: 'region-table', columnId: 'region-id' },
+          left: { datasetId: 'sales-ds', tableId: 'sales-table', columnId: 'sales-orderid' },
+          right: { datasetId: 'region-ds', tableId: 'region-table', columnId: 'region-id' },
           cardinality: 'one-to-many',
-          crossFilterDirection: 'single',
+          oneSide: 'left',
+          crossFilterDirection: 'left-to-right',
           active: true,
           createdAt: new Date().toISOString(),
         },
@@ -132,6 +132,32 @@ describe('analyzeMeasureContext', () => {
     }
 
     const analysis = analyzeMeasureContext({ model: forcedCycle, datasets, measureId, filterContext: { filters: [] } })
+
+    expect(analysis.invalid).toBeUndefined()
+    expect(analysis.tables).toBeDefined()
+    expect(analysis.relationships).toBeDefined()
+  })
+
+  it('fails closed with an `invalid` state when the active relationship graph is ambiguous (a diamond)', () => {
+    const { model, datasets, measureId } = buildStarSchemaFixture()
+    const withDiamond: SemanticModel = {
+      ...model,
+      relationships: [
+        ...model.relationships,
+        {
+          id: 'region-to-sales-direct',
+          left: { datasetId: 'region-ds', tableId: 'region-table', columnId: 'region-id' },
+          right: { datasetId: 'sales-ds', tableId: 'sales-table', columnId: 'sales-orderid' },
+          cardinality: 'one-to-many',
+          oneSide: 'left',
+          crossFilterDirection: 'left-to-right',
+          active: true,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    }
+
+    const analysis = analyzeMeasureContext({ model: withDiamond, datasets, measureId, filterContext: { filters: [] } })
 
     expect(analysis.invalid).toBeDefined()
     expect(analysis.invalid!.code).toBe('FILTER_GRAPH_INVALID')

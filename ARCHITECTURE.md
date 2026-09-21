@@ -646,6 +646,110 @@ with zero console errors. See [`docs/DATE_TABLES.md`](./docs/DATE_TABLES.md)
 and [`docs/TIME_INTELLIGENCE.md`](./docs/TIME_INTELLIGENCE.md) for the full
 design and known DAX compatibility limitations.
 
+## Sprint 11 implementation (Advanced Relationships & USERELATIONSHIP/CROSSFILTER)
+
+```text
+domain/model.ts                   Relationship migrated to a generic shape:
+                                     { id, left, right, cardinality: 'one-to-many' |
+                                     'one-to-one' | 'many-to-many', oneSide?, crossFilterDirection:
+                                     'left-to-right' | 'right-to-left' | 'both', active, createdAt }
+                                     — no field named one/many on the canonical type
+
+runtime/model/relationshipHelpers.ts   NEW — the single centralized module for relationship
+                                          orientation: relationshipEndpoint/relationshipOtherSide/
+                                          relationshipOneEndpoint(only one-to-many)/
+                                          relationshipManyEndpoint/relationshipConnectsColumns/
+                                          relationshipConnectsTables/siblingRelationships,
+                                          relationshipPropagationEdges() (derives 0-2 directed
+                                          RelationshipPropagationEdges per relationship, folding in
+                                          any runtime USERELATIONSHIP/CROSSFILTER override),
+                                          findAmbiguousDirectedPairs()/hasAmbiguousDirectedPath()
+                                          (directed multi-path detection, shared by graphAnalysis.ts
+                                          and modelRuntime.ts's create/activate-time validation) —
+                                          no other file reads relationship.left/.right and derives
+                                          orientation on its own
+
+runtime/model/modelRuntime.ts     hydrateSemanticModel() converts a legacy persisted
+                                     { one, many, cardinality: 'one-to-many', crossFilterDirection:
+                                     'single' } relationship to the canonical shape (left=one,
+                                     right=many, oneSide='left', crossFilterDirection='left-to-right'
+                                     — numerically identical to old behavior); createRelationshipConfig/
+                                     validateRelationshipConfig/updateRelationship are the new
+                                     cardinality-aware create/validate/edit pipeline, replacing the old
+                                     single-cardinality createRelationship/validateRelationship, which
+                                     now survive only as thin one-to-many convenience wrappers around
+                                     the new functions; setRelationshipActive returns { model,
+                                     diagnostics } and fails closed (clone-validate-commit) instead of
+                                     unconditionally flipping a boolean
+
+runtime/measure/filterPropagation.ts   propagate() walks relationshipPropagationEdges() to a fixed
+                                          point instead of a hardcoded one->many step — the same
+                                          "foreign key value -> target row indices" membership test
+                                          now covers every cardinality/direction combination;
+                                          resolveFilterContext/resolveFilterContextUnchecked gained an
+                                          optional EffectiveRelationshipState parameter for
+                                          USERELATIONSHIP/CROSSFILTER overrides
+
+runtime/model/graphAnalysis.ts    ACTIVE_CYCLE (undirected active-relationship cycle detection) is
+                                     retired entirely, not generalized — a legal bidirectional
+                                     relationship is a 2-node directed cycle, so simple cycle
+                                     detection is the wrong tool once bidirectional cross-filter
+                                     exists. AMBIGUOUS_FILTER_PATH (redesigned from the old
+                                     undirected AMBIGUOUS_PATH, promoted to error severity) is the
+                                     only graph-invalidating condition now: more than one distinct
+                                     directed propagation path between an ordered table pair
+
+runtime/measure/contextModifier.ts   EffectiveContext gained relationshipState:
+                                        EffectiveRelationshipState (activatedRelationshipIds/
+                                        suppressedRelationshipIds/directionOverrides), cloned per
+                                        CALCULATE scope exactly like columnFilters/tableSelections;
+                                        RelationshipOverrideModifier is a new FilterModifier variant
+                                        (alongside ReplaceColumnFilter/PredicateFilter/RemoveColumns/
+                                        RemoveTables/ClearAllFilters/DateTableReplace) that
+                                        USERELATIONSHIP/CROSSFILTER both bind to — one override
+                                        layer, not two — applied through the same applyFilterModifier
+                                        switch, never mutating the persisted SemanticModel
+
+expression/measureBinder.ts       bindUserRelationship()/bindCrossFilter() resolve the relationship
+                                     connecting two named columns (either argument order) and build a
+                                     RelationshipOverrideModifier; CROSSFILTER's direction argument
+                                     (NONE/BOTH/ONEWAY/ONEWAY_LEFTFILTERSRIGHT/ONEWAY_RIGHTFILTERSLEFT)
+                                     parses as a bare identifier, reusing DATEADD's interval-unit
+                                     grammar pattern — no new parser grammar needed
+
+expression/relatedLookup.ts       resolveRelatedRelationship() is now cardinality-aware:
+                                     one-to-many unchanged (many->one only), one-to-one valid in
+                                     either direction (both sides unique), many-to-many always
+                                     rejected with RELATED_UNSUPPORTED_CARDINALITY (RELATED never
+                                     picks an arbitrary row)
+
+domain/context.ts                 ContextRelationshipState generalized from one/many to
+                                     left/right + cardinality + crossFilterDirection; propagation
+                                     is now a list (0-2 entries) instead of one before/after pair;
+                                     new effectiveActive/overrideReason fields sourced from
+                                     ResolvedFilterState.relationshipOverrides
+components/context/ContextDetailsPanel.tsx   renders a human-readable override banner
+                                                (activated-by-userelationship/
+                                                suppressed-by-userelationship/
+                                                crossfilter-direction-override/crossfilter-none)
+                                                from runtime truth, never inferred from source text
+
+domain/validation.ts              + RelationshipConfigValidationRule ('relationship-config') for
+                                     asserting a relationship's full cardinality/oneSide/
+                                     crossFilterDirection/active configuration, alongside the
+                                     still-supported 1:* 'relationship' rule
+runtime/validation/fingerprint.ts   relationship fingerprint fields changed from
+                                       { one, many, active, cardinality } to
+                                       { left, right, cardinality, oneSide, crossFilterDirection,
+                                       active } — crossFilterDirection now participates in staleness
+                                       detection, where it was previously silently omitted
+```
+
+No visual-specific or relationship-specific changes were needed in `runtime/visual/*`/`components/visual/*` — every Visual still calls the unmodified `evaluateMeasure`, so a bidirectional/many-to-many/`USERELATIONSHIP`/`CROSSFILTER` measure "just works" the moment it's created. See
+[`docs/ADVANCED_RELATIONSHIPS.md`](./docs/ADVANCED_RELATIONSHIPS.md) and
+[`docs/USERELATIONSHIP.md`](./docs/USERELATIONSHIP.md) for the full design,
+migration/hydration details, and known Power BI compatibility boundaries.
+
 ## Expression strategy
 
 Do not implement full DAX.

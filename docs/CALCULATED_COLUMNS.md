@@ -87,28 +87,51 @@ via `compareScalarValues` (`src/expression/scalarComparison.ts`), not
 reimplemented — see `docs/ITERATORS.md` "Conditional logic" for the full
 behavior table (it applies identically here).
 
-## RELATED
+## RELATED rules
 
-`RELATED(Table[Column])` requires, from the calculated column's own table
-(the "many" side) to the named table (the "one" side):
+`RELATED(Table[Column])` resolves the single active relationship connecting
+the calculated column's own table to the named table
+(`src/expression/relatedLookup.ts#resolveRelatedRelationship`). Sprint 3
+only supported a direct active unambiguous many-side lookup; Sprint 11
+generalized this to be cardinality-aware, branching on the resolved
+relationship's `cardinality`:
 
-- a relationship exists between the two tables,
-- it is **active**,
-- it runs in the correct direction (many→one, from the current table),
-- and there is exactly one such relationship (not two ambiguous ones).
+- **`one-to-many`** (unchanged from Sprint 3): only many→one is ever a
+  valid `RELATED` direction — a many-side row unambiguously looks up its
+  one-side row, and the reverse has no such guarantee
+  (`RELATED_WRONG_DIRECTION` for the reverse).
+- **`one-to-one`** (Sprint 11): both endpoints are unique, so `RELATED` is
+  valid from either side — no `RELATED_WRONG_DIRECTION` for a 1:1
+  relationship.
+- **`many-to-many`** (Sprint 11): neither side is guaranteed unique, so
+  `RELATED` could only ever pick an arbitrary matching row — always
+  rejected with `RELATED_UNSUPPORTED_CARDINALITY` rather than silently
+  choosing one.
 
 | Situation | Diagnostic |
 |---|---|
 | No relationship at all between the two tables | `RELATED_NO_RELATIONSHIP` |
-| A relationship exists in the right direction but is inactive | `RELATED_INACTIVE_RELATIONSHIP` |
-| A relationship exists but runs the other way (current table is the "1" side) | `RELATED_WRONG_DIRECTION` |
+| A relationship exists in a valid direction but is inactive | `RELATED_INACTIVE_RELATIONSHIP` |
+| A `one-to-many` relationship exists but runs the other way (current table is the "1" side) | `RELATED_WRONG_DIRECTION` |
 | More than one active relationship connects the same two tables | `RELATED_AMBIGUOUS_RELATIONSHIP` |
+| The relationship connecting the two tables is `many-to-many` | `RELATED_UNSUPPORTED_CARDINALITY` |
 | The named table/column doesn't exist | `UNKNOWN_TABLE` / `UNKNOWN_COLUMN` |
 
-If the current row's foreign key has no matching one-side row (e.g. a
-`ProductID` that doesn't exist in `Products`), `RELATED` returns blank
-(`null`) for that row rather than an error — this is normal, expected data,
-not a failure, and it's shown in the trace as `metadata: { matched: false }`.
+`RELATED` deliberately ignores `crossFilterDirection` in every case — it's a
+row-context lookup concept, not a visual filter-propagation concept. The
+actual index-building (`resolveRelatedIndexAndKey`) is generic across every
+supported cardinality: it resolves whichever side matches the requested
+target column as the index side, and the other side as the current row's
+own foreign-key column — one implementation, shared with iterator row
+expressions (`SUMX`/etc., see [`docs/ITERATORS.md`](./ITERATORS.md)). See
+[`docs/ADVANCED_RELATIONSHIPS.md`](./ADVANCED_RELATIONSHIPS.md) "RELATED
+compatibility" for the full design.
+
+If the current row's foreign key has no matching row on the other side
+(e.g. a `ProductID` that doesn't exist in `Products`), `RELATED` returns
+blank (`null`) for that row rather than an error — this is normal, expected
+data, not a failure, and it's shown in the trace as
+`metadata: { matched: false }`.
 
 `RELATED` uses an indexed one-side lookup
 (`src/expression/relatedLookup.ts#buildRelatedIndex`), built once per

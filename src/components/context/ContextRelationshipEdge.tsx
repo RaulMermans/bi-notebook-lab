@@ -1,12 +1,18 @@
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type Edge, type EdgeProps } from '@xyflow/react'
 import type { RelationshipPropagationState } from '../../domain/context'
+import type { CrossFilterDirection, RelationshipCardinality, RelationshipSide } from '../../domain/model'
+import { relationshipCardinalityLabel } from '../../lib/format/relationshipLabel'
 
 export interface ContextRelationshipEdgeData extends Record<string, unknown> {
   state: RelationshipPropagationState
-  oneColumnName: string
-  manyColumnName: string
-  manyRowsBefore?: number
-  manyRowsAfter?: number
+  leftColumnName: string
+  rightColumnName: string
+  cardinality: RelationshipCardinality
+  crossFilterDirection: CrossFilterDirection
+  oneSide?: RelationshipSide
+  overridden: boolean
+  totalRowsBefore?: number
+  totalRowsAfter?: number
   selected: boolean
   onSelect: (relationshipId: string) => void
 }
@@ -58,12 +64,15 @@ export function ContextRelationshipEdge({
           aria-pressed={data?.selected}
         >
           <span className="context-edge-label__direction">
-            {data?.oneColumnName} 1 → * {data?.manyColumnName}
+            {data?.leftColumnName} {data ? relationshipCardinalityLabel(data.cardinality, data.crossFilterDirection, data.oneSide) : ''} {data?.rightColumnName}
           </span>
-          <span className="context-edge-label__state">{STATE_LABEL[state]}</span>
-          {state === 'propagated' && typeof data?.manyRowsBefore === 'number' && (
+          <span className="context-edge-label__state">
+            {STATE_LABEL[state]}
+            {data?.overridden ? ' · OVERRIDDEN' : ''}
+          </span>
+          {state === 'propagated' && typeof data?.totalRowsBefore === 'number' && (
             <span className="context-edge-label__impact">
-              {data.manyRowsBefore.toLocaleString()} → {data.manyRowsAfter?.toLocaleString()}
+              {data.totalRowsBefore.toLocaleString()} → {data.totalRowsAfter?.toLocaleString()}
             </span>
           )}
         </button>

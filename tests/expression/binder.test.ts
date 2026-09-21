@@ -63,10 +63,11 @@ function baseModel(): { model: SemanticModel; datasets: Record<string, Dataset>;
 function relationship(productsId: string, salesId: string, active = true): Relationship {
   return {
     id: 'rel-1',
-    one: { datasetId: 'products-ds', tableId: 'products-table', columnId: 'products-id' },
-    many: { datasetId: 'sales-ds', tableId: 'sales-table', columnId: 'sales-productid' },
+    left: { datasetId: 'products-ds', tableId: 'products-table', columnId: 'products-id' },
+    right: { datasetId: 'sales-ds', tableId: 'sales-table', columnId: 'sales-productid' },
     cardinality: 'one-to-many',
-    crossFilterDirection: 'single',
+    oneSide: 'left',
+    crossFilterDirection: 'left-to-right',
     active,
     createdAt: new Date().toISOString(),
   }
@@ -147,10 +148,11 @@ describe('bind', () => {
     // Sales as the "one" side, Products as the "many" side: reversed from what RELATED(Products[...]) from Sales needs.
     const reversed: Relationship = {
       id: 'rel-reversed',
-      one: { datasetId: 'sales-ds', tableId: 'sales-table', columnId: 'sales-productid' },
-      many: { datasetId: 'products-ds', tableId: 'products-table', columnId: 'products-id' },
+      left: { datasetId: 'sales-ds', tableId: 'sales-table', columnId: 'sales-productid' },
+      right: { datasetId: 'products-ds', tableId: 'products-table', columnId: 'products-id' },
       cardinality: 'one-to-many',
-      crossFilterDirection: 'single',
+      oneSide: 'left',
+      crossFilterDirection: 'left-to-right',
       active: true,
       createdAt: new Date().toISOString(),
     }

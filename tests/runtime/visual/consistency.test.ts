@@ -79,11 +79,11 @@ describe('Inactive-relationship end-to-end verification (brief §48/§70)', () =
     const activeResult = runKpiVisual(model, datasets, { id: 'kpi', type: 'kpi', measureId }, filterContext)
     expect(activeResult.value).toBe(180) // orders 1, 3, 5
 
-    const inactiveModel = setRelationshipActive(model, productRelationshipId, false)
+    const { model: inactiveModel } = setRelationshipActive(model, productRelationshipId, false)
     const inactiveResult = runKpiVisual(inactiveModel, datasets, { id: 'kpi', type: 'kpi', measureId }, filterContext)
     expect(inactiveResult.value).toBe(460) // Product filter no longer propagates to Sales
 
-    const reenabledModel = setRelationshipActive(inactiveModel, productRelationshipId, true)
+    const { model: reenabledModel } = setRelationshipActive(inactiveModel, productRelationshipId, true)
     const recoveredResult = runKpiVisual(reenabledModel, datasets, { id: 'kpi', type: 'kpi', measureId }, filterContext)
     expect(recoveredResult.value).toBe(180)
   })

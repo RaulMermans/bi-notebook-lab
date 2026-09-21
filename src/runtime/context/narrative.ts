@@ -40,8 +40,8 @@ export function buildContextNarrative(
   for (const step of state.propagationSteps) {
     steps.push({
       order: order++,
-      description: `${step.oneKeyColumnName} filter propagated from ${step.oneTableName} to ${step.manyTableName}. ${step.manyRowsBefore.toLocaleString()} → ${step.manyRowsAfter.toLocaleString()} rows.`,
-      metadata: { relationshipId: step.relationshipId, rowsBefore: step.manyRowsBefore, rowsAfter: step.manyRowsAfter },
+      description: `${step.sourceColumnName} filter propagated from ${step.sourceTableName} to ${step.targetTableName}. ${step.targetRowsBefore.toLocaleString()} → ${step.targetRowsAfter.toLocaleString()} rows.`,
+      metadata: { relationshipId: step.relationshipId, rowsBefore: step.targetRowsBefore, rowsAfter: step.targetRowsAfter },
     })
   }
 
@@ -84,7 +84,7 @@ export function buildBeginnerExplanation(measureName: string, measureValue: unkn
 
   for (const step of state.propagationSteps) {
     sentences.push(
-      `That filter travels through the active ${step.oneKeyColumnName} relationship. ${step.manyTableName} is reduced from ${step.manyRowsBefore.toLocaleString()} to ${step.manyRowsAfter.toLocaleString()} rows.`,
+      `That filter travels through the active ${step.sourceColumnName} relationship. ${step.targetTableName} is reduced from ${step.targetRowsBefore.toLocaleString()} to ${step.targetRowsAfter.toLocaleString()} rows.`,
     )
   }
 

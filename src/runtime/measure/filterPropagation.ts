@@ -1,9 +1,15 @@
 import type { Dataset } from '../../domain/data'
-import type { ModelTable, Relationship, SemanticModel } from '../../domain/model'
+import type { ColumnRef, ModelTable, SemanticModel } from '../../domain/model'
 import { diagnostic, type ExpressionDiagnostic } from '../../expression/diagnostics'
 import type { ExecutionTraceNode } from '../../expression/trace'
-import { activeRelationships, modelTableFor, validateModel } from '../model/graphAnalysis'
+import { modelTableFor, validateModel } from '../model/graphAnalysis'
 import { resolveColumnRef, resolveTableRef } from '../model/modelRuntime'
+import {
+  createEmptyRelationshipState,
+  relationshipPropagationEdges,
+  type EffectiveRelationshipState,
+  type RelationshipPropagationEdge,
+} from '../model/relationshipHelpers'
 import type { ColumnFilter, FilterContext } from './filterContext'
 
 /** `'all'` means "unfiltered" — every row of the table is visible. Kept lazy so an unfiltered 100k-row fact table never materializes a Set. */
@@ -26,14 +32,23 @@ export interface DirectFilterSummary {
   rowsAfter: number
 }
 
+/**
+ * One directed propagation hop — the generic replacement for the old
+ * `one`/`many`-specific shape (sprint brief §53). A single relationship can
+ * contribute 0, 1 or 2 of these per resolution, depending on its effective
+ * cardinality/cross-filter direction (see `relationshipPropagationEdges`).
+ */
 export interface PropagationStep {
   relationshipId: string
-  oneTableName: string
-  manyTableName: string
-  oneKeyColumnName: string
-  manyKeyColumnName: string
-  manyRowsBefore: number
-  manyRowsAfter: number
+  sourceModelTableId: string
+  sourceTableName: string
+  sourceColumnName: string
+  targetModelTableId: string
+  targetTableName: string
+  targetColumnName: string
+  direction: RelationshipPropagationEdge['direction']
+  targetRowsBefore: number
+  targetRowsAfter: number
 }
 
 export interface ResolvedFilterState {
@@ -44,6 +59,8 @@ export interface ResolvedFilterState {
   directFilterSummaries: DirectFilterSummary[]
   propagationSteps: PropagationStep[]
   trace: ExecutionTraceNode
+  /** Which relationships this resolution's `relationshipState` activated/suppressed relative to the persisted model — surfaced for the Context Explorer (sprint brief §50-51), never inferred from source text. */
+  relationshipOverrides?: { activated: string[]; suppressed: string[] }
 }
 
 function isVisible(selection: RowSelection, rowIndex: number): boolean {
@@ -100,9 +117,9 @@ function applyDirectFilters(
   }
 }
 
-/** Builds a `foreign key value -> many-side row indices` index for one relationship, reused across the fixed-point loop instead of rescanning the many-side table every iteration. */
-function buildManySideKeyIndex(datasets: Record<string, Dataset>, relationship: Relationship): Map<unknown, number[]> | undefined {
-  const resolved = resolveColumnRef(datasets, relationship.many)
+/** Builds a `foreign key value -> target-side row indices` index for one propagation edge, reused across the fixed-point loop instead of rescanning the target table every iteration. */
+function buildTargetKeyIndex(datasets: Record<string, Dataset>, targetColumn: ColumnRef): Map<unknown, number[]> | undefined {
+  const resolved = resolveColumnRef(datasets, targetColumn)
   if (!resolved) return undefined
   const index = new Map<unknown, number[]>()
   resolved.table.rows.forEach((row, rowIndex) => {
@@ -115,12 +132,12 @@ function buildManySideKeyIndex(datasets: Record<string, Dataset>, relationship: 
   return index
 }
 
-function allowedKeysFromOneSide(datasets: Record<string, Dataset>, relationship: Relationship, oneSelection: RowSelection): Set<unknown> {
-  const resolved = resolveColumnRef(datasets, relationship.one)
+function allowedKeysFromSource(datasets: Record<string, Dataset>, sourceColumn: ColumnRef, sourceSelection: RowSelection): Set<unknown> {
+  const resolved = resolveColumnRef(datasets, sourceColumn)
   const allowed = new Set<unknown>()
   if (!resolved) return allowed
   resolved.table.rows.forEach((row, rowIndex) => {
-    if (!isVisible(oneSelection, rowIndex)) return
+    if (!isVisible(sourceSelection, rowIndex)) return
     const value = row[resolved.column.name]
     if (value !== null && value !== undefined) allowed.add(value)
   })
@@ -134,70 +151,78 @@ function tableLabel(model: SemanticModel, datasets: Record<string, Dataset>, ref
 }
 
 /**
- * Propagates row selections through active `1 → *` relationships to a fixed
- * point, so transitive chains (Region → Customers → Sales) resolve without
- * hardcoding hop counts. Cycles/ambiguous paths are rejected upstream by the
- * `FILTER_GRAPH_INVALID` guard in `resolveFilterContext`, so this loop always
- * terminates within `relationships.length + 1` passes.
+ * Propagates row selections through every effective directed propagation
+ * edge (sprint brief §11-14) to a fixed point — generic across `1 → *`,
+ * `* → 1`, `1 ↔ 1` and `* → *`, since every edge reduces to the same "key
+ * value membership" step (`buildTargetKeyIndex`/`allowedKeysFromSource`)
+ * regardless of cardinality. Row selections only ever shrink during
+ * resolution, and the loop is bounded by `tables + edges` — if that bound is
+ * exhausted without reaching a fixed point (which the monotonic-shrink
+ * invariant should make impossible), resolution fails closed with
+ * `PROPAGATION_DID_NOT_CONVERGE` rather than looping forever or returning a
+ * partially-resolved state silently (sprint brief §14).
  */
 function propagate(
   model: SemanticModel,
   datasets: Record<string, Dataset>,
   rowSelections: Map<string, RowSelection>,
   steps: PropagationStep[],
-): void {
-  const relationships = activeRelationships(model)
-  const manyIndexCache = new Map<string, Map<unknown, number[]> | undefined>()
+  relationshipState: EffectiveRelationshipState,
+): { converged: boolean } {
+  const edges = relationshipPropagationEdges(model, relationshipState)
+  const targetIndexCache = new Map<string, Map<unknown, number[]> | undefined>()
+  const edgeKey = (edge: RelationshipPropagationEdge) => `${edge.relationshipId}:${edge.direction}`
 
   let changed = true
   let iterations = 0
-  const maxIterations = relationships.length + 1
+  const maxIterations = model.tables.length + edges.length + 1
 
-  while (changed && iterations <= maxIterations) {
+  while (changed) {
+    if (iterations > maxIterations) return { converged: false }
     changed = false
     iterations += 1
 
-    for (const relationship of relationships) {
-      const oneTable = modelTableFor(model, relationship.one)
-      const manyTable = modelTableFor(model, relationship.many)
-      if (!oneTable || !manyTable) continue
+    for (const edge of edges) {
+      const sourceSelection = rowSelections.get(edge.sourceModelTableId) ?? 'all'
+      if (sourceSelection === 'all') continue // nothing constrained on the source side yet — no propagation needed from here
 
-      const oneSelection = rowSelections.get(oneTable.id) ?? 'all'
-      if (oneSelection === 'all') continue // nothing constrained on the "1" side yet — no propagation needed from here
+      const key = edgeKey(edge)
+      if (!targetIndexCache.has(key)) targetIndexCache.set(key, buildTargetKeyIndex(datasets, edge.targetColumn))
+      const targetIndex = targetIndexCache.get(key)
+      const targetResolved = resolveColumnRef(datasets, edge.targetColumn)
+      if (!targetIndex || !targetResolved) continue
 
-      if (!manyIndexCache.has(relationship.id)) {
-        manyIndexCache.set(relationship.id, buildManySideKeyIndex(datasets, relationship))
-      }
-      const manyIndex = manyIndexCache.get(relationship.id)
-      const manyResolved = resolveColumnRef(datasets, relationship.many)
-      if (!manyIndex || !manyResolved) continue
-
-      const allowedKeys = allowedKeysFromOneSide(datasets, relationship, oneSelection)
+      const allowedKeys = allowedKeysFromSource(datasets, edge.sourceColumn, sourceSelection)
       const matched = new Set<number>()
-      for (const key of allowedKeys) {
-        for (const rowIndex of manyIndex.get(key) ?? []) matched.add(rowIndex)
+      for (const value of allowedKeys) {
+        for (const rowIndex of targetIndex.get(value) ?? []) matched.add(rowIndex)
       }
 
-      const before = rowSelections.get(manyTable.id) ?? 'all'
-      const beforeSize = selectionSize(before, manyResolved.table.rowCount)
+      const before = rowSelections.get(edge.targetModelTableId) ?? 'all'
+      const beforeSize = selectionSize(before, targetResolved.table.rowCount)
       const after = intersectIntoSet(before, matched)
 
       const sameAsBefore = before !== 'all' && before.size === after.size && [...after].every((i) => before.has(i))
       if (before === 'all' || !sameAsBefore) {
-        rowSelections.set(manyTable.id, after)
+        rowSelections.set(edge.targetModelTableId, after)
         changed = true
         steps.push({
-          relationshipId: relationship.id,
-          oneTableName: tableLabel(model, datasets, relationship.one),
-          manyTableName: tableLabel(model, datasets, relationship.many),
-          oneKeyColumnName: resolveColumnRef(datasets, relationship.one)?.column.name ?? '',
-          manyKeyColumnName: manyResolved.column.name,
-          manyRowsBefore: beforeSize,
-          manyRowsAfter: after.size,
+          relationshipId: edge.relationshipId,
+          sourceTableName: tableLabel(model, datasets, edge.sourceColumn),
+          sourceModelTableId: edge.sourceModelTableId,
+          sourceColumnName: resolveColumnRef(datasets, edge.sourceColumn)?.column.name ?? '',
+          targetTableName: tableLabel(model, datasets, edge.targetColumn),
+          targetModelTableId: edge.targetModelTableId,
+          targetColumnName: targetResolved.column.name,
+          direction: edge.direction,
+          targetRowsBefore: beforeSize,
+          targetRowsAfter: after.size,
         })
       }
     }
   }
+
+  return { converged: true }
 }
 
 function buildTrace(
@@ -217,10 +242,11 @@ function buildTrace(
   }
 
   for (const step of propagationSteps) {
+    const arrow = step.direction === 'left-to-right' ? '→' : '←'
     children.push({
       kind: 'relationship-propagation',
-      label: `${step.oneTableName}[${step.oneKeyColumnName}] 1 → * ${step.manyTableName}[${step.manyKeyColumnName}]`,
-      metadata: { manyRowsBefore: step.manyRowsBefore, manyRowsAfter: step.manyRowsAfter },
+      label: `${step.sourceTableName}[${step.sourceColumnName}] ${arrow} ${step.targetTableName}[${step.targetColumnName}]`,
+      metadata: { targetRowsBefore: step.targetRowsBefore, targetRowsAfter: step.targetRowsAfter },
     })
   }
 
@@ -234,7 +260,10 @@ function buildTrace(
 
 /**
  * Checks the model's own relationship graph once — validity is a property of
- * `model` alone, independent of any `FilterContext`, so a CALCULATE-heavy
+ * `model` alone (no runtime overrides — see `runtime/measure/contextModifier.ts`'s
+ * `EffectiveRelationshipState` for why per-call overrides don't need their
+ * own live re-validation, docs/ADVANCED_RELATIONSHIPS.md "USERELATIONSHIP
+ * and ambiguity"), independent of any `FilterContext`, so a CALCULATE-heavy
  * evaluation (which may resolve many nested contexts against the *same*
  * model) only needs to run this once per `evaluateMeasure` call rather than
  * once per nested resolution (sprint brief §68 "avoid obvious repeated
@@ -244,7 +273,7 @@ function buildTrace(
  */
 export function checkFilterGraphValidity(model: SemanticModel, datasets: Record<string, Dataset>): ExpressionDiagnostic[] {
   const modelDiagnostics = validateModel(model, datasets)
-  const graphIssues = modelDiagnostics.filter((d) => d.code === 'ACTIVE_CYCLE' || d.code === 'AMBIGUOUS_PATH')
+  const graphIssues = modelDiagnostics.filter((d) => d.code === 'AMBIGUOUS_FILTER_PATH')
   if (graphIssues.length === 0) return []
   return [
     diagnostic(
@@ -279,13 +308,18 @@ function invalidFilterState(diagnostics: ExpressionDiagnostic[]): ResolvedFilter
  * predicate)`-derived row subset (sprint brief §21) both AND-combines with
  * any ordinary `ColumnFilter` landing on the same table and propagates
  * through active relationships exactly like a direct filter would, with no
- * changes to `propagate()` itself.
+ * changes to `propagate()` itself. `relationshipState`, when given, scopes
+ * which relationships are effectively active/suppressed and which direction
+ * they filter in for *this* resolution only (Sprint 11's `USERELATIONSHIP`/
+ * `CROSSFILTER` — see `contextModifier.ts`'s `EffectiveContext`); it never
+ * mutates the persisted model.
  */
 export function resolveFilterContextUnchecked(
   model: SemanticModel,
   datasets: Record<string, Dataset>,
   filterContext: FilterContext,
   tableSelections?: Map<string, Set<number>>,
+  relationshipState: EffectiveRelationshipState = createEmptyRelationshipState(),
 ): ResolvedFilterState {
   const rowSelections = new Map<string, RowSelection>()
   if (tableSelections) {
@@ -296,7 +330,17 @@ export function resolveFilterContextUnchecked(
   applyDirectFilters(model, datasets, filterContext.filters, rowSelections, directFilterSummaries)
 
   const propagationSteps: PropagationStep[] = []
-  propagate(model, datasets, rowSelections, propagationSteps)
+  const { converged } = propagate(model, datasets, rowSelections, propagationSteps, relationshipState)
+
+  if (!converged) {
+    return invalidFilterState([
+      diagnostic(
+        'error',
+        'PROPAGATION_DID_NOT_CONVERGE',
+        "Filter propagation did not settle within the expected number of passes. This shouldn't happen — please report it.",
+      ),
+    ])
+  }
 
   const tableSummaries: TableRowSummary[] = model.tables.map((table: ModelTable) => {
     const resolved = resolveTableRef(datasets, table)
@@ -318,25 +362,31 @@ export function resolveFilterContextUnchecked(
     directFilterSummaries,
     propagationSteps,
     trace: buildTrace(filterContext, directFilterSummaries, propagationSteps, tableSummaries),
+    relationshipOverrides: {
+      activated: [...relationshipState.activatedRelationshipIds],
+      suppressed: [...relationshipState.suppressedRelationshipIds],
+    },
   }
 }
 
 /**
  * Resolves a `FilterContext` into concrete row selections per model table:
- * direct filters first, then fixed-point propagation through active `1 → *`
- * relationships. Fails closed with `FILTER_GRAPH_INVALID` if the model's own
- * relationship graph is already invalid (`ACTIVE_CYCLE`/`AMBIGUOUS_PATH`) —
- * see docs/FILTER_CONTEXT.md "Invalid filter graphs".
+ * direct filters first, then fixed-point propagation through every
+ * effective directed propagation edge. Fails closed with
+ * `FILTER_GRAPH_INVALID` if the model's own relationship graph is already
+ * invalid (`AMBIGUOUS_FILTER_PATH`) — see docs/FILTER_CONTEXT.md "Invalid
+ * filter graphs".
  */
 export function resolveFilterContext(
   model: SemanticModel,
   datasets: Record<string, Dataset>,
   filterContext: FilterContext,
   tableSelections?: Map<string, Set<number>>,
+  relationshipState?: EffectiveRelationshipState,
 ): ResolvedFilterState {
   const graphDiagnostics = checkFilterGraphValidity(model, datasets)
   if (graphDiagnostics.length > 0) return invalidFilterState(graphDiagnostics)
-  return resolveFilterContextUnchecked(model, datasets, filterContext, tableSelections)
+  return resolveFilterContextUnchecked(model, datasets, filterContext, tableSelections, relationshipState)
 }
 
 export function visibleRowIndices(state: ResolvedFilterState, modelTableId: string, totalRows: number): number[] {

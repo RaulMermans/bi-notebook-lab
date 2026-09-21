@@ -4,11 +4,14 @@ import type { Dataset } from '../../domain/data'
 import type { ColumnRef, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
 import type { DateTableDiagnostic } from '../../runtime/dateTable/dateTableTypes'
 import { resolveColumnRef } from '../../runtime/model/modelRuntime'
+import type { RelationshipConfigInput } from '../../runtime/model/modelRuntime'
 import { validateModel } from '../../runtime/model/graphAnalysis'
+import { relationshipCardinalityLabel } from '../../lib/format/relationshipLabel'
 import { ContextExplorer } from '../context/ContextExplorer'
 import { DateTableControls } from './model/DateTableControls'
 import { ModelCanvas } from './model/ModelCanvas'
 import { ModelHealthSummary, modelHealthLabel } from './model/ModelHealthSummary'
+import { RelationshipEditPanel } from './model/RelationshipEditPanel'
 import { RelationshipForm } from './model/RelationshipForm'
 import { TableRegistrationPanel } from './model/TableRegistrationPanel'
 
@@ -22,9 +25,10 @@ interface ModelCellCardProps {
   onAddTable: (ref: TableRef) => void
   onRemoveTable: (modelTableId: string) => void
   onMoveTable: (modelTableId: string, position: { x: number; y: number }) => void
-  onCreateRelationship: (input: { one: ColumnRef; many: ColumnRef; active: boolean }) => Promise<RelationshipDiagnostic[]>
+  onCreateRelationship: (input: RelationshipConfigInput) => Promise<RelationshipDiagnostic[]>
+  onUpdateRelationship: (relationshipId: string, changes: RelationshipConfigInput) => Promise<RelationshipDiagnostic[]>
   onRemoveRelationship: (relationshipId: string) => void
-  onSetRelationshipActive: (relationshipId: string, active: boolean) => void
+  onSetRelationshipActive: (relationshipId: string, active: boolean) => Promise<RelationshipDiagnostic[]>
   onMarkDateTable: (modelTableId: string, dateColumn: ColumnRef) => Promise<DateTableDiagnostic[]>
   onUnmarkDateTable: (modelTableId: string) => void
 }
@@ -44,6 +48,7 @@ export function ModelCellCard({
   onRemoveTable,
   onMoveTable,
   onCreateRelationship,
+  onUpdateRelationship,
   onRemoveRelationship,
   onSetRelationshipActive,
   onMarkDateTable,
@@ -51,8 +56,16 @@ export function ModelCellCard({
 }: ModelCellCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [view, setView] = useState<ModelCellView>('model')
+  const [activeToggleErrors, setActiveToggleErrors] = useState<Record<string, string>>({})
+  const [editingRelationshipId, setEditingRelationshipId] = useState<string | undefined>()
 
   const diagnostics = useMemo(() => (model ? validateModel(model, datasets) : []), [model, datasets])
+
+  async function handleSetActive(relationshipId: string, active: boolean) {
+    const result = await onSetRelationshipActive(relationshipId, active)
+    const error = result.find((d) => d.severity === 'error')
+    setActiveToggleErrors((current) => ({ ...current, [relationshipId]: error?.message ?? '' }))
+  }
 
   if (!model) {
     return (
@@ -164,19 +177,32 @@ export function ModelCellCard({
                     {model.relationships.map((relationship) => (
                       <li key={relationship.id} className={relationship.active ? '' : 'relationship-list__item--inactive'}>
                         <span>
-                          {columnLabel(datasets, relationship.one)} <strong>1 → *</strong> {columnLabel(datasets, relationship.many)}
+                          {columnLabel(datasets, relationship.left)}{' '}
+                          <strong>{relationshipCardinalityLabel(relationship.cardinality, relationship.crossFilterDirection, relationship.oneSide)}</strong>{' '}
+                          {columnLabel(datasets, relationship.right)}
                         </span>
                         <label className="relationship-list__active">
-                          <input
-                            type="checkbox"
-                            checked={relationship.active}
-                            onChange={(e) => onSetRelationshipActive(relationship.id, e.target.checked)}
-                          />
+                          <input type="checkbox" checked={relationship.active} onChange={(e) => handleSetActive(relationship.id, e.target.checked)} />
                           Active
                         </label>
+                        {activeToggleErrors[relationship.id] && <span className="relationship-list__error">{activeToggleErrors[relationship.id]}</span>}
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => setEditingRelationshipId((current) => (current === relationship.id ? undefined : relationship.id))}
+                        >
+                          {editingRelationshipId === relationship.id ? 'Close' : 'Edit'}
+                        </button>
                         <button type="button" className="text-button" onClick={() => onRemoveRelationship(relationship.id)}>
                           Remove
                         </button>
+                        {editingRelationshipId === relationship.id && (
+                          <RelationshipEditPanel
+                            relationship={relationship}
+                            onUpdateRelationship={onUpdateRelationship}
+                            onDone={() => setEditingRelationshipId(undefined)}
+                          />
+                        )}
                       </li>
                     ))}
                   </ul>

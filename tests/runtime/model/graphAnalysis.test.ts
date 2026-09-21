@@ -16,10 +16,11 @@ function withTables(names: string[]): { model: SemanticModel; ids: Record<string
 function relationship(oneDataset: string, manyDataset: string, active = true): Relationship {
   return {
     id: `${manyDataset}->${oneDataset}`,
-    one: { datasetId: oneDataset, tableId: `${oneDataset}-table`, columnId: `${oneDataset}-col` },
-    many: { datasetId: manyDataset, tableId: `${manyDataset}-table`, columnId: `${manyDataset}-col` },
+    left: { datasetId: oneDataset, tableId: `${oneDataset}-table`, columnId: `${oneDataset}-col` },
+    right: { datasetId: manyDataset, tableId: `${manyDataset}-table`, columnId: `${manyDataset}-col` },
     cardinality: 'one-to-many',
-    crossFilterDirection: 'single',
+    oneSide: 'left',
+    crossFilterDirection: 'left-to-right',
     active,
     createdAt: new Date().toISOString(),
   }
@@ -35,8 +36,7 @@ describe('validateModel graph diagnostics', () => {
 
     const diagnostics = validateModel(withRelationships, {})
 
-    expect(diagnostics.some((d) => d.code === 'ACTIVE_CYCLE')).toBe(false)
-    expect(diagnostics.some((d) => d.code === 'AMBIGUOUS_PATH')).toBe(false)
+    expect(diagnostics.some((d) => d.code === 'AMBIGUOUS_FILTER_PATH')).toBe(false)
     expect(diagnostics.some((d) => d.code === 'ISOLATED_TABLE')).toBe(false)
     expect(diagnostics.some((d) => d.code === 'STAR_SCHEMA_VALID')).toBe(true)
   })
@@ -50,7 +50,7 @@ describe('validateModel graph diagnostics', () => {
     expect(diagnostics).toContainEqual(expect.objectContaining({ code: 'ISOLATED_TABLE' }))
   })
 
-  it('detects a cycle among active relationships', () => {
+  it('a directed cycle among active one-to-many relationships is legal (ACTIVE_CYCLE is retired, sprint brief §15)', () => {
     const { model } = withTables(['a', 'b', 'c'])
     const withRelationships: SemanticModel = {
       ...model,
@@ -59,7 +59,8 @@ describe('validateModel graph diagnostics', () => {
 
     const diagnostics = validateModel(withRelationships, {})
 
-    expect(diagnostics).toContainEqual(expect.objectContaining({ code: 'ACTIVE_CYCLE' }))
+    // a->b->c->a: every ordered pair has exactly one directed path, so this is not ambiguous.
+    expect(diagnostics.some((d) => d.code === 'AMBIGUOUS_FILTER_PATH')).toBe(false)
   })
 
   it('detects an ambiguous active path in a diamond shape', () => {
@@ -71,18 +72,28 @@ describe('validateModel graph diagnostics', () => {
 
     const diagnostics = validateModel(withRelationships, {})
 
-    expect(diagnostics).toContainEqual(expect.objectContaining({ code: 'AMBIGUOUS_PATH' }))
+    expect(diagnostics).toContainEqual(expect.objectContaining({ code: 'AMBIGUOUS_FILTER_PATH' }))
   })
 
-  it('excludes inactive relationships from cycle and ambiguous-path analysis', () => {
+  it('excludes inactive relationships from ambiguous-path analysis', () => {
     const { model } = withTables(['a', 'b', 'c'])
     const withRelationships: SemanticModel = {
       ...model,
-      relationships: [relationship('a', 'b'), relationship('b', 'c'), relationship('c', 'a', false)],
+      relationships: [relationship('a', 'b'), relationship('a', 'c'), relationship('b', 'c', false)],
     }
 
     const diagnostics = validateModel(withRelationships, {})
 
-    expect(diagnostics.some((d) => d.code === 'ACTIVE_CYCLE')).toBe(false)
+    expect(diagnostics.some((d) => d.code === 'AMBIGUOUS_FILTER_PATH')).toBe(false)
+  })
+
+  it('a legal bidirectional relationship between two tables is not flagged as ambiguous (sprint brief §66)', () => {
+    const { model } = withTables(['a', 'b'])
+    const bidirectional: Relationship = { ...relationship('a', 'b'), crossFilterDirection: 'both' }
+    const withRelationships: SemanticModel = { ...model, relationships: [bidirectional] }
+
+    const diagnostics = validateModel(withRelationships, {})
+
+    expect(diagnostics.some((d) => d.code === 'AMBIGUOUS_FILTER_PATH')).toBe(false)
   })
 })

@@ -1,4 +1,12 @@
 import type { ContextRelationshipState, ContextTableState } from '../../domain/context'
+import { relationshipCardinalityLabel } from '../../lib/format/relationshipLabel'
+
+const OVERRIDE_REASON_LABEL: Record<NonNullable<ContextRelationshipState['overrideReason']>, string> = {
+  'activated-by-userelationship': 'Temporarily activated by USERELATIONSHIP for this calculation',
+  'suppressed-by-userelationship': 'Suppressed for this calculation — a competing relationship was activated by USERELATIONSHIP',
+  'crossfilter-direction-override': 'Direction temporarily changed by CROSSFILTER for this calculation',
+  'crossfilter-none': 'Temporarily disabled by CROSSFILTER(..., NONE) for this calculation',
+}
 
 interface ContextDetailsPanelProps {
   tables: ContextTableState[]
@@ -50,7 +58,7 @@ function TableDetails({ table }: { table: ContextTableState }) {
         <ul className="context-details__list">
           {table.incomingPropagation.map((p, i) => (
             <li key={i}>
-              {p.oneTableName}[{p.oneKeyColumnName}]
+              {p.sourceTableName}[{p.sourceColumnName}]
             </li>
           ))}
         </ul>
@@ -60,58 +68,46 @@ function TableDetails({ table }: { table: ContextTableState }) {
 }
 
 function RelationshipDetails({ relationship, tables }: { relationship: ContextRelationshipState; tables: ContextTableState[] }) {
-  const oneTable = tables.find((t) => t.modelTableId === relationship.oneModelTableId)
+  const tableName = (modelTableId: string) => tables.find((t) => t.modelTableId === modelTableId)?.tableName ?? 'Unknown table'
 
   return (
     <div className="context-details">
       <h4>Relationship Propagation</h4>
       <p className="context-details__direction">
-        {relationship.oneTableName}[{relationship.oneColumnName}]
+        {relationship.leftColumnName}
         <br />
-        1 → *
+        {relationshipCardinalityLabel(relationship.cardinality, relationship.crossFilterDirection, relationship.oneSide)}
         <br />
-        {relationship.manyTableName}[{relationship.manyColumnName}]
+        {relationship.rightColumnName}
+      </p>
+      <p className="context-details__note">
+        Model: {relationship.active ? 'Active' : 'Inactive'} ({relationship.cardinality})
       </p>
 
-      {!relationship.active && (
-        <p className="context-details__note">This relationship is inactive — it does not participate in filter propagation right now.</p>
+      {relationship.overrideReason && (
+        <p className="context-details__note context-details__note--override">{OVERRIDE_REASON_LABEL[relationship.overrideReason]}</p>
       )}
 
-      {relationship.active && relationship.state === 'active-no-effect' && (
-        <p className="context-details__note">
-          This relationship is active, but had no effect under the current filters — its "1" side ({relationship.oneTableName}) isn't
-          currently constrained.
-        </p>
+      {!relationship.effectiveActive && (
+        <p className="context-details__note">This relationship is not participating in filter propagation right now.</p>
       )}
 
-      {relationship.state === 'propagated' && (
+      {relationship.effectiveActive && relationship.state === 'active-no-effect' && (
+        <p className="context-details__note">This relationship is active, but had no effect under the current filters.</p>
+      )}
+
+      {relationship.propagation.length > 0 && (
         <dl className="context-details__stats">
-          {oneTable && (
-            <div>
-              <dt>{relationship.oneTableName} visible rows</dt>
+          {relationship.propagation.map((p, i) => (
+            <div key={i}>
+              <dt>
+                {tableName(p.targetModelTableId)} rows ({p.direction === 'left-to-right' ? 'left → right' : 'right → left'})
+              </dt>
               <dd>
-                {oneTable.visibleRows.toLocaleString()} / {oneTable.totalRows.toLocaleString()}
+                {p.targetRowsBefore.toLocaleString()} → {p.targetRowsAfter.toLocaleString()}
               </dd>
             </div>
-          )}
-          {typeof relationship.allowedOneSideKeys === 'number' && (
-            <div>
-              <dt>Allowed {relationship.oneColumnName} keys</dt>
-              <dd>{relationship.allowedOneSideKeys.toLocaleString()}</dd>
-            </div>
-          )}
-          <div>
-            <dt>{relationship.manyTableName} rows before</dt>
-            <dd>{relationship.manyRowsBefore?.toLocaleString()}</dd>
-          </div>
-          <div>
-            <dt>{relationship.manyTableName} rows after</dt>
-            <dd>{relationship.manyRowsAfter?.toLocaleString()}</dd>
-          </div>
-          <div>
-            <dt>Rows removed</dt>
-            <dd>{((relationship.manyRowsBefore ?? 0) - (relationship.manyRowsAfter ?? 0)).toLocaleString()}</dd>
-          </div>
+          ))}
         </dl>
       )}
     </div>

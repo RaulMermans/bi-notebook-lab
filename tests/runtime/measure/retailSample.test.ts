@@ -261,11 +261,11 @@ describe('Retail sample measures', () => {
 
     const unfiltered = evaluateMeasure(withMeasures, datasets, findMeasureId(withMeasures, 'Total Revenue'))
 
-    const disabledModel = setRelationshipActive(withMeasures, productRelationshipId, false)
+    const { model: disabledModel } = setRelationshipActive(withMeasures, productRelationshipId, false)
     const disabledExecution = evaluateMeasure(disabledModel, datasets, findMeasureId(disabledModel, 'Total Revenue'), filterContext)
     expect(disabledExecution.value).toBeCloseTo(unfiltered.value as number, 6)
 
-    const reEnabledModel = setRelationshipActive(disabledModel, productRelationshipId, true)
+    const { model: reEnabledModel } = setRelationshipActive(disabledModel, productRelationshipId, true)
     const reEnabledExecution = evaluateMeasure(reEnabledModel, datasets, findMeasureId(reEnabledModel, 'Total Revenue'), filterContext)
     expect(reEnabledExecution.value as number).toBeLessThan(unfiltered.value as number)
   })

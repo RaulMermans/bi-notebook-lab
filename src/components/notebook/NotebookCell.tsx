@@ -8,6 +8,7 @@ import type { DateTableDiagnostic } from '../../runtime/dateTable/dateTableTypes
 import type { CalculatedColumnExecution } from '../../runtime/calculatedColumn/calculatedColumnRuntime'
 import type { FilterContext } from '../../runtime/measure/filterContext'
 import type { MeasureExecution } from '../../runtime/measure/measureRuntime'
+import type { RelationshipConfigInput } from '../../runtime/model/modelRuntime'
 import { NotebookCellCard } from '../NotebookCellCard'
 import { CalculatedColumnCellCard } from './CalculatedColumnCellCard'
 import { DataCellCard } from './DataCellCard'
@@ -25,12 +26,10 @@ interface NotebookCellProps {
   onAddTableToModel: (modelId: string, ref: TableRef) => void
   onRemoveTableFromModel: (modelId: string, modelTableId: string) => void
   onMoveModelTable: (modelId: string, modelTableId: string, position: { x: number; y: number }) => void
-  onCreateRelationship: (
-    modelId: string,
-    input: { one: ColumnRef; many: ColumnRef; active: boolean },
-  ) => Promise<RelationshipDiagnostic[]>
+  onCreateRelationship: (modelId: string, input: RelationshipConfigInput) => Promise<RelationshipDiagnostic[]>
+  onUpdateRelationship: (modelId: string, relationshipId: string, changes: RelationshipConfigInput) => Promise<RelationshipDiagnostic[]>
   onRemoveRelationship: (modelId: string, relationshipId: string) => void
-  onSetRelationshipActive: (modelId: string, relationshipId: string, active: boolean) => void
+  onSetRelationshipActive: (modelId: string, relationshipId: string, active: boolean) => Promise<RelationshipDiagnostic[]>
   onMarkDateTable: (modelId: string, modelTableId: string, dateColumn: ColumnRef) => Promise<DateTableDiagnostic[]>
   onUnmarkDateTable: (modelId: string, modelTableId: string) => void
   onUpdateCalculatedColumn: (
@@ -67,6 +66,7 @@ export function NotebookCell({
   onRemoveTableFromModel,
   onMoveModelTable,
   onCreateRelationship,
+  onUpdateRelationship,
   onRemoveRelationship,
   onSetRelationshipActive,
   onMarkDateTable,
@@ -102,6 +102,7 @@ export function NotebookCell({
         onRemoveTable={(modelTableId) => onRemoveTableFromModel(cell.modelId, modelTableId)}
         onMoveTable={(modelTableId, position) => onMoveModelTable(cell.modelId, modelTableId, position)}
         onCreateRelationship={(input) => onCreateRelationship(cell.modelId, input)}
+        onUpdateRelationship={(relationshipId, changes) => onUpdateRelationship(cell.modelId, relationshipId, changes)}
         onRemoveRelationship={(relationshipId) => onRemoveRelationship(cell.modelId, relationshipId)}
         onSetRelationshipActive={(relationshipId, active) => onSetRelationshipActive(cell.modelId, relationshipId, active)}
         onMarkDateTable={(modelTableId, dateColumn) => onMarkDateTable(cell.modelId, modelTableId, dateColumn)}

@@ -73,7 +73,7 @@ describe('calculatedColumnValidation', () => {
       expression: 'RELATED(Products[Category])',
     })
     expect(marginByCategory.diagnostics).toEqual([])
-    const disabled = setRelationshipActive(marginByCategory.model, built.productRelationshipId, false)
+    const { model: disabled } = setRelationshipActive(marginByCategory.model, built.productRelationshipId, false)
 
     const result = evaluateCalculatedColumnResultRule(
       {

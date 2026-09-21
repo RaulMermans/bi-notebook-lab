@@ -1,5 +1,5 @@
 import type { DataType, Dataset } from '../domain/data'
-import type { ColumnRef, SemanticModel } from '../domain/model'
+import type { ColumnRef, CrossFilterDirection, Relationship, SemanticModel } from '../domain/model'
 import { bindPredicateExpression, dedupeColumnRefs, describeBoundPredicate, type BoundPredicateNode } from '../runtime/measure/booleanFilter'
 import type { FilterModifier } from '../runtime/measure/contextModifier'
 import { resolveLogicalColumn, type LogicalColumnRef } from '../runtime/measure/logicalColumn'
@@ -9,9 +9,10 @@ import { bindDateColumnArgument } from '../runtime/timeIntelligence/timeIntellig
 import { bindIteratorCall, isIteratorFunctionName } from '../runtime/iterator/iteratorBinder'
 import type { BoundIteratorCall } from '../runtime/iterator/iteratorTypes'
 import { resolveTableRef } from '../runtime/model/modelRuntime'
+import { relationshipConnectsColumns, siblingRelationships } from '../runtime/model/relationshipHelpers'
 import type { BinaryOperator, ComparisonOperator, Expression, FunctionCallNode, LogicalOperator, SourceSpan, UnaryOperator } from './ast'
 import { findModelTableByName } from './binder'
-import { diagnostic, type ExpressionDiagnostic } from './diagnostics'
+import { diagnostic, type ExpressionDiagnostic, type ExpressionDiagnosticCode } from './diagnostics'
 
 /**
  * Bound measure AST — the filter-context counterpart to `BoundExpression`
@@ -344,8 +345,6 @@ const UNSUPPORTED_CALCULATE_ADJACENT_FUNCTIONS = new Set([
   'ALLEXCEPT',
   'ALLSELECTED',
   'CALCULATETABLE',
-  'USERELATIONSHIP',
-  'CROSSFILTER',
 ])
 
 /** Extracts `Column = Literal` (or `Literal = Column`) as a canonical `ColumnFilter` — sprint brief §16 "Equality can usually become a canonical ColumnFilter directly." */
@@ -574,13 +573,277 @@ function bindTimeIntelligenceFilterModifier(node: FunctionCallNode, ctx: Measure
   }
 }
 
-/** Binds one CALCULATE filter argument — dispatches to REMOVEFILTERS/ALL/FILTER/time-intelligence, or tries it as a direct boolean filter expression (sprint brief §12-§21). */
+function sameColumnRef(a: ColumnRef, b: ColumnRef): boolean {
+  return a.datasetId === b.datasetId && a.tableId === b.tableId && a.columnId === b.columnId
+}
+
+/** Resolves a `Table[Column]` argument to a physical `ColumnRef` — the shape `USERELATIONSHIP`/`CROSSFILTER` require for both arguments (sprint brief §23: "fully-qualified physical column references... No measure, expression, calculated result, literal"). */
+function resolveQualifiedColumnArg(
+  argNode: Expression,
+  ctx: MeasureBindContext,
+  invalidCode: ExpressionDiagnosticCode,
+  invalidMessage: string,
+): { resolved?: ColumnRef; label?: string; diagnostics: ExpressionDiagnostic[] } {
+  if (argNode.kind !== 'ColumnReference' || argNode.table === null) {
+    return { diagnostics: [diagnostic('error', invalidCode, invalidMessage, argNode.span)] }
+  }
+
+  const modelTable = findModelTableByName(ctx.model, ctx.datasets, argNode.table)
+  if (!modelTable) {
+    return {
+      diagnostics: [diagnostic('error', 'UNKNOWN_TABLE', `Unknown table "${argNode.table}".`, argNode.tableSpan ?? argNode.span, { table: argNode.table })],
+    }
+  }
+  const resolvedTable = resolveTableRef(ctx.datasets, modelTable)
+  const column = resolvedTable?.table.columns.find((c) => c.name.toLowerCase() === argNode.column.toLowerCase())
+  if (!resolvedTable || !column) {
+    return {
+      diagnostics: [
+        diagnostic('error', 'UNKNOWN_COLUMN', `Unknown column "${argNode.column}" on "${argNode.table}".`, argNode.columnSpan, {
+          table: argNode.table,
+          column: argNode.column,
+        }),
+      ],
+    }
+  }
+
+  return {
+    resolved: { datasetId: resolvedTable.dataset.id, tableId: resolvedTable.table.id, columnId: column.id },
+    label: `${resolvedTable.table.name}[${column.name}]`,
+    diagnostics: [],
+  }
+}
+
+function describeRelationshipLabel(model: SemanticModel, datasets: Record<string, Dataset>, relationship: Relationship): string {
+  const left = resolveTableRefColumnLabel(model, datasets, relationship.left)
+  const right = resolveTableRefColumnLabel(model, datasets, relationship.right)
+  return `${left} ↔ ${right}`
+}
+
+function resolveTableRefColumnLabel(model: SemanticModel, datasets: Record<string, Dataset>, ref: ColumnRef): string {
+  const modelTable = model.tables.find((t) => t.datasetId === ref.datasetId && t.tableId === ref.tableId)
+  const resolved = modelTable ? resolveTableRef(datasets, modelTable) : undefined
+  const column = resolved?.table.columns.find((c) => c.id === ref.columnId)
+  return `${resolved?.table.name ?? 'Unknown table'}[${column?.name ?? ref.columnId}]`
+}
+
+/** Finds the exactly-one relationship connecting `a`/`b` (either argument order) — shared resolution logic for both `USERELATIONSHIP` and `CROSSFILTER` (sprint brief §23, §70 "argument order may be reversed"). */
+function resolveRelationshipArgumentPair(
+  ctx: MeasureBindContext,
+  a: { resolved?: ColumnRef; label?: string },
+  b: { resolved?: ColumnRef; label?: string },
+  notFoundCode: ExpressionDiagnosticCode,
+  ambiguousCode: ExpressionDiagnosticCode,
+  span: Expression['span'],
+): { relationship?: Relationship; diagnostics: ExpressionDiagnostic[] } {
+  const matches = ctx.model.relationships.filter((r) => relationshipConnectsColumns(r, a.resolved!, b.resolved!))
+  if (matches.length === 0) {
+    return { diagnostics: [diagnostic('error', notFoundCode, `No relationship connects "${a.label}" and "${b.label}".`, span)] }
+  }
+  if (matches.length > 1) {
+    return { diagnostics: [diagnostic('error', ambiguousCode, `More than one relationship connects "${a.label}" and "${b.label}".`, span)] }
+  }
+  return { relationship: matches[0], diagnostics: [] }
+}
+
+/**
+ * Binds `USERELATIONSHIP(Table1[Column], Table2[Column])` as a CALCULATE
+ * filter modifier (sprint brief §22-§31). Only valid as a CALCULATE
+ * argument. Resolves to exactly one existing relationship regardless of
+ * argument order for one-to-many/many-to-many; for a one-to-one relationship
+ * the argument order sets a single bounded direction — "arg2's table
+ * filters arg1's table" (sprint brief §31) — never silently `'both'`.
+ */
+function bindUserRelationship(node: FunctionCallNode, ctx: MeasureBindContext): { modifier?: FilterModifier; diagnostics: ExpressionDiagnostic[] } {
+  if (node.args.length !== 2) {
+    return {
+      diagnostics: [
+        diagnostic(
+          'error',
+          'USERELATIONSHIP_INVALID_ARITY',
+          'USERELATIONSHIP expects exactly two arguments: USERELATIONSHIP(Table1[Column], Table2[Column]).',
+          node.span,
+        ),
+      ],
+    }
+  }
+
+  const [argA, argB] = node.args
+  const invalidMessage = 'USERELATIONSHIP arguments must be fully-qualified physical columns, e.g. Sales[ShipDate] — not a measure, expression, calculated result or literal.'
+  const a = resolveQualifiedColumnArg(argA, ctx, 'USERELATIONSHIP_COLUMN_REQUIRED', invalidMessage)
+  const b = resolveQualifiedColumnArg(argB, ctx, 'USERELATIONSHIP_COLUMN_REQUIRED', invalidMessage)
+  const diagnostics = [...a.diagnostics, ...b.diagnostics]
+  if (!a.resolved || !b.resolved) return { diagnostics }
+
+  const found = resolveRelationshipArgumentPair(ctx, a, b, 'USERELATIONSHIP_RELATIONSHIP_NOT_FOUND', 'USERELATIONSHIP_AMBIGUOUS_RELATIONSHIP', node.span)
+  diagnostics.push(...found.diagnostics)
+  if (!found.relationship) return { diagnostics }
+
+  const relationship = found.relationship
+  const siblings = siblingRelationships(ctx.model, relationship)
+  const conflictingLabels = siblings.map((s) => describeRelationshipLabel(ctx.model, ctx.datasets, s))
+  const modelStateLabel = relationship.active ? 'Active' : 'Inactive'
+
+  let directions: Exclude<CrossFilterDirection, 'both'>[] | undefined
+  if (relationship.cardinality === 'one-to-one') {
+    const aIsLeft = sameColumnRef(relationship.left, a.resolved)
+    directions = [aIsLeft ? 'right-to-left' : 'left-to-right']
+  }
+
+  return {
+    modifier: {
+      kind: 'RelationshipOverride',
+      sourceFunction: 'USERELATIONSHIP',
+      relationshipId: relationship.id,
+      action: directions ? 'direction' : 'activate',
+      directions,
+      conflictingRelationshipIds: siblings.map((s) => s.id),
+      requestedLabel: `${a.label} ↔ ${b.label}`,
+      modelStateLabel,
+      conflictingLabels,
+      label: `USERELATIONSHIP(${a.label}, ${b.label})`,
+    },
+    diagnostics,
+  }
+}
+
+const CROSSFILTER_DIRECTION_KEYWORDS = new Set(['NONE', 'BOTH', 'ONEWAY', 'ONEWAY_LEFTFILTERSRIGHT', 'ONEWAY_RIGHTFILTERSLEFT'])
+
+/**
+ * Binds `CROSSFILTER(Table1[Column], Table2[Column], direction)` as a
+ * CALCULATE filter modifier (sprint brief §32-§34). The direction argument
+ * parses as a bare identifier (`TableReference` node, same as `DATEADD`'s
+ * `YEAR`/`QUARTER`/`MONTH`/`DAY` — no grammar change needed) and is
+ * validated against the resolved relationship's cardinality.
+ */
+function bindCrossFilter(node: FunctionCallNode, ctx: MeasureBindContext): { modifier?: FilterModifier; diagnostics: ExpressionDiagnostic[] } {
+  if (node.args.length !== 3) {
+    return {
+      diagnostics: [
+        diagnostic(
+          'error',
+          'CROSSFILTER_INVALID_ARITY',
+          'CROSSFILTER expects exactly three arguments: CROSSFILTER(Table1[Column], Table2[Column], NONE|BOTH|ONEWAY|ONEWAY_LEFTFILTERSRIGHT|ONEWAY_RIGHTFILTERSLEFT).',
+          node.span,
+        ),
+      ],
+    }
+  }
+
+  const [argA, argB, directionArg] = node.args
+  const invalidMessage = 'CROSSFILTER arguments must be fully-qualified physical columns, e.g. Customers[CustomerID] — not a measure, expression, calculated result or literal.'
+  const a = resolveQualifiedColumnArg(argA, ctx, 'CROSSFILTER_COLUMN_REQUIRED', invalidMessage)
+  const b = resolveQualifiedColumnArg(argB, ctx, 'CROSSFILTER_COLUMN_REQUIRED', invalidMessage)
+  const diagnostics = [...a.diagnostics, ...b.diagnostics]
+
+  let directionKeyword: string | undefined
+  if (directionArg.kind === 'TableReference' && CROSSFILTER_DIRECTION_KEYWORDS.has(directionArg.table.toUpperCase())) {
+    directionKeyword = directionArg.table.toUpperCase()
+  } else {
+    diagnostics.push(
+      diagnostic(
+        'error',
+        'CROSSFILTER_INVALID_DIRECTION',
+        "CROSSFILTER's third argument must be one of NONE, BOTH, ONEWAY, ONEWAY_LEFTFILTERSRIGHT or ONEWAY_RIGHTFILTERSLEFT (unquoted).",
+        directionArg.span,
+      ),
+    )
+  }
+
+  if (!a.resolved || !b.resolved || !directionKeyword) return { diagnostics }
+
+  const found = resolveRelationshipArgumentPair(ctx, a, b, 'CROSSFILTER_RELATIONSHIP_NOT_FOUND', 'CROSSFILTER_AMBIGUOUS_RELATIONSHIP', node.span)
+  diagnostics.push(...found.diagnostics)
+  if (!found.relationship) return { diagnostics }
+
+  const relationship = found.relationship
+
+  if (directionKeyword === 'ONEWAY' && relationship.cardinality !== 'one-to-many') {
+    diagnostics.push(
+      diagnostic(
+        'error',
+        'CROSSFILTER_DIRECTION_INVALID_FOR_CARDINALITY',
+        'ONEWAY is only valid for a one-to-many relationship — use ONEWAY_LEFTFILTERSRIGHT/ONEWAY_RIGHTFILTERSLEFT for many-to-many, or BOTH/NONE for one-to-one.',
+        directionArg.span,
+      ),
+    )
+  }
+  if ((directionKeyword === 'ONEWAY_LEFTFILTERSRIGHT' || directionKeyword === 'ONEWAY_RIGHTFILTERSLEFT') && relationship.cardinality !== 'many-to-many') {
+    diagnostics.push(
+      diagnostic(
+        'error',
+        'CROSSFILTER_DIRECTION_INVALID_FOR_CARDINALITY',
+        `${directionKeyword} is only valid for a many-to-many relationship.`,
+        directionArg.span,
+      ),
+    )
+  }
+  if (relationship.cardinality === 'one-to-one' && directionKeyword !== 'NONE' && directionKeyword !== 'BOTH') {
+    diagnostics.push(
+      diagnostic('error', 'CROSSFILTER_DIRECTION_INVALID_FOR_CARDINALITY', 'A one-to-one relationship only supports CROSSFILTER NONE or BOTH.', directionArg.span),
+    )
+  }
+  if (diagnostics.some((d) => d.severity === 'error')) return { diagnostics }
+
+  const siblings = directionKeyword === 'NONE' ? [] : siblingRelationships(ctx.model, relationship)
+  const modelStateLabel = relationship.active ? `Active (${relationship.crossFilterDirection})` : 'Inactive'
+  const requestedLabel = `${a.label} ↔ ${b.label} (${directionKeyword})`
+  const label = `CROSSFILTER(${a.label}, ${b.label}, ${directionKeyword})`
+  const conflictingLabels = siblings.map((s) => describeRelationshipLabel(ctx.model, ctx.datasets, s))
+  const conflictingRelationshipIds = siblings.map((s) => s.id)
+
+  if (directionKeyword === 'NONE') {
+    return {
+      modifier: {
+        kind: 'RelationshipOverride',
+        sourceFunction: 'CROSSFILTER',
+        relationshipId: relationship.id,
+        action: 'suppress',
+        conflictingRelationshipIds: [],
+        requestedLabel,
+        modelStateLabel,
+        conflictingLabels: [],
+        label,
+      },
+      diagnostics,
+    }
+  }
+
+  const directions: Exclude<CrossFilterDirection, 'both'>[] =
+    directionKeyword === 'BOTH'
+      ? ['left-to-right', 'right-to-left']
+      : directionKeyword === 'ONEWAY'
+        ? [relationship.oneSide === 'left' ? 'left-to-right' : 'right-to-left']
+        : directionKeyword === 'ONEWAY_LEFTFILTERSRIGHT'
+          ? ['left-to-right']
+          : ['right-to-left']
+
+  return {
+    modifier: {
+      kind: 'RelationshipOverride',
+      sourceFunction: 'CROSSFILTER',
+      relationshipId: relationship.id,
+      action: 'direction',
+      directions,
+      conflictingRelationshipIds,
+      requestedLabel,
+      modelStateLabel,
+      conflictingLabels,
+      label,
+    },
+    diagnostics,
+  }
+}
+
+/** Binds one CALCULATE filter argument — dispatches to REMOVEFILTERS/ALL/FILTER/time-intelligence/USERELATIONSHIP/CROSSFILTER, or tries it as a direct boolean filter expression (sprint brief §12-§21, §22-§34). */
 function bindCalculateFilterArgument(argNode: Expression, ctx: MeasureBindContext): { modifier?: FilterModifier; diagnostics: ExpressionDiagnostic[] } {
   if (argNode.kind === 'FunctionCall') {
     const name = argNode.name.toUpperCase()
     if (name === 'REMOVEFILTERS') return bindRemoveFilters(argNode, ctx)
     if (name === 'ALL') return bindAll(argNode, ctx)
     if (name === 'FILTER') return bindFilterFunction(argNode, ctx)
+    if (name === 'USERELATIONSHIP') return bindUserRelationship(argNode, ctx)
+    if (name === 'CROSSFILTER') return bindCrossFilter(argNode, ctx)
     if (TIME_INTELLIGENCE_FUNCTION_NAMES.has(name)) return bindTimeIntelligenceFilterModifier(argNode, ctx)
     if (UNSUPPORTED_CALCULATE_ADJACENT_FUNCTIONS.has(name)) {
       return {
@@ -825,6 +1088,32 @@ function bindMeasureFunctionCall(node: FunctionCallNode, ctx: MeasureBindContext
           'error',
           'UNSUPPORTED_FUNCTION',
           'FILTER is only supported as a CALCULATE filter argument or as the table argument to COUNTROWS/an iterator function (SUMX, AVERAGEX, MINX, MAXX, COUNTX), e.g. CALCULATE([Total Revenue], FILTER(...)) or SUMX(FILTER(...), ...).',
+          node.nameSpan,
+        ),
+      ],
+    }
+  }
+
+  if (name === 'USERELATIONSHIP') {
+    return {
+      diagnostics: [
+        diagnostic(
+          'error',
+          'USERELATIONSHIP_INVALID_CONTEXT',
+          'USERELATIONSHIP is only supported as a CALCULATE filter argument, e.g. CALCULATE([Total Revenue], USERELATIONSHIP(Sales[ShipDate], Calendar[Date])). It does not return a value on its own.',
+          node.nameSpan,
+        ),
+      ],
+    }
+  }
+
+  if (name === 'CROSSFILTER') {
+    return {
+      diagnostics: [
+        diagnostic(
+          'error',
+          'CROSSFILTER_INVALID_CONTEXT',
+          'CROSSFILTER is only supported as a CALCULATE filter argument, e.g. CALCULATE([Total Revenue], CROSSFILTER(Customers[CustomerID], Sales[CustomerID], BOTH)). It does not return a value on its own.',
           node.nameSpan,
         ),
       ],

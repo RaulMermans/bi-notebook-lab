@@ -52,7 +52,7 @@ describe('Retail Foundations checkpoint (Sprint 5 end-to-end)', () => {
     const baseline = runValidation({ datasets, models: { [solved.id]: solved } }, cellFor(solved.id))
     expect(baseline.passed).toBe(true)
 
-    const broken = setRelationshipActive(solved, productRelationshipId, false)
+    const { model: broken } = setRelationshipActive(solved, productRelationshipId, false)
     const run = runValidation({ datasets, models: { [broken.id]: broken } }, cellFor(broken.id))
 
     expect(run.percentage).toBeLessThan(baseline.percentage)
@@ -106,8 +106,8 @@ describe('Retail Foundations checkpoint (Sprint 5 end-to-end)', () => {
   it('re-enabling a disabled relationship restores the full score', () => {
     const { model, datasets, salesTableId, productRelationshipId } = buildRetailModel()
     const solved = addRetailFoundationsSolution(model, datasets, salesTableId)
-    const disabled = setRelationshipActive(solved, productRelationshipId, false)
-    const reenabled = setRelationshipActive(disabled, productRelationshipId, true)
+    const { model: disabled } = setRelationshipActive(solved, productRelationshipId, false)
+    const { model: reenabled } = setRelationshipActive(disabled, productRelationshipId, true)
 
     const run = runValidation({ datasets, models: { [reenabled.id]: reenabled } }, cellFor(reenabled.id))
     expect(run.percentage).toBeCloseTo(100, 5)

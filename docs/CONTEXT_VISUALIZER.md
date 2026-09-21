@@ -328,6 +328,36 @@ weren't true, the Context Explorer and the measure runtime could silently
 drift apart (the same rationale `docs/VALIDATION_ENGINE.md` gives for why
 the validation engine never reimplements BI logic).
 
+## Sprint 11 addendum
+
+### USERELATIONSHIP / CROSSFILTER (Sprint 11)
+
+`domain/context.ts`'s `ContextRelationshipState` generalized off the old
+hardcoded `one`/`many` naming: `oneModelTableId`/`manyModelTableId` became
+`leftModelTableId`/`rightModelTableId` (plus `cardinality` and
+`crossFilterDirection` fields), and `propagation` is now a list (0-2
+`ContextRelationshipPropagationEntry` entries) rather than a single
+before/after pair, since a bidirectional or 1:1 relationship can propagate
+in both directions within the same resolution. Two new fields —
+`effectiveActive` (whether the relationship actually participates in
+propagation edges for this resolution, folding in any
+`USERELATIONSHIP`/`CROSSFILTER` override) and `overrideReason` (one of
+`'activated-by-userelationship'`/`'suppressed-by-userelationship'`/
+`'crossfilter-direction-override'`/`'crossfilter-none'`) — are sourced from
+`ResolvedFilterState.relationshipOverrides`, i.e. runtime truth, never
+inferred from the measure's source text.
+
+`ContextDetailsPanel.tsx` renders a human-readable override banner from
+`overrideReason` whenever it's set (e.g. "Temporarily activated by
+USERELATIONSHIP for this calculation," "Suppressed for this calculation — a
+competing relationship was activated by USERELATIONSHIP") alongside the
+relationship's persisted `active` state, so a learner inspecting a
+`USERELATIONSHIP`/`CROSSFILTER` measure's propagation diagram sees exactly
+which relationship won and why — the same "runtime-truth reuse" discipline
+this whole layer follows (see "No duplicated propagation algorithm" above).
+See [`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md) "Execution trace" for
+how this fits alongside the modifier trace.
+
 ## Known limitations
 
 - No exercise-authoring integration beyond a manual pointer:
@@ -342,7 +372,11 @@ the validation engine never reimplements BI logic).
   the cell, or reloading the page). It is preserved across the Model ↔
   Context Explorer tab switch within the same session (see "Where it
   lives" above).
-- `ContextPropagationDiagram` inherits the same relationship model as
-  Sprint 4: one-to-many, single-direction filtering only. There is nothing
-  to visualize for bidirectional or many-to-many relationships because they
-  don't exist yet.
+- `ContextPropagationDiagram`'s node/edge layout (React Flow, one node per
+  table, one edge per relationship) is unchanged from Sprint 4 — a
+  bidirectional or many-to-many relationship (Sprint 11) renders as an edge
+  labeled with its generic cardinality (`1 ↔ *`, `* ↔ *`, ...,
+  `relationshipCardinalityLabel`) and can show a propagation entry in either
+  direction, but there is no dedicated bidirectional-specific visual
+  treatment beyond the label/direction the edge and details panel already
+  surface (see "USERELATIONSHIP / CROSSFILTER (Sprint 11)" below).

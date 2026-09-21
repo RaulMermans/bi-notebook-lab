@@ -1,4 +1,4 @@
-import type { ModelDiagnosticCode } from './model'
+import type { CrossFilterDirection, ModelDiagnosticCode, RelationshipCardinality, RelationshipSide } from './model'
 
 /**
  * Author-facing selectors — the Sprint 5 layer that lets an exercise
@@ -66,6 +66,7 @@ export interface ValidationFilter {
 
 export type ValidationRuleType =
   | 'relationship'
+  | 'relationship-config'
   | 'model-health'
   | 'table-present'
   | 'calculated-column-result'
@@ -89,6 +90,24 @@ export interface RelationshipValidationRule extends BaseValidationRule {
   one: ColumnSelector
   many: ColumnSelector
   /** Defaults to `true` — most exercises expect the relationship to be active. */
+  active?: boolean
+}
+
+/**
+ * Sprint 11: asserts the *full* configuration of a relationship — cardinality,
+ * which side is the "1" side, cross-filter direction and active state — the
+ * `relationship` rule above can't express since it's hardcoded to a 1:*
+ * single-direction expectation (docs/ADVANCED_RELATIONSHIPS.md "Validation").
+ * Matches a relationship connecting `left`/`right` in either author-selector
+ * order.
+ */
+export interface RelationshipConfigValidationRule extends BaseValidationRule {
+  type: 'relationship-config'
+  left: ColumnSelector
+  right: ColumnSelector
+  cardinality: RelationshipCardinality
+  oneSide?: RelationshipSide
+  crossFilterDirection: CrossFilterDirection
   active?: boolean
 }
 
@@ -168,6 +187,7 @@ export interface DateTableValidationRule extends BaseValidationRule {
 
 export type ValidationRule =
   | RelationshipValidationRule
+  | RelationshipConfigValidationRule
   | ModelHealthValidationRule
   | TablePresenceValidationRule
   | CalculatedColumnResultRule

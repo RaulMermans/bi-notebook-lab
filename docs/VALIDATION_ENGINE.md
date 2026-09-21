@@ -442,6 +442,37 @@ integration". Grading a time-intelligence measure's *numeric* output (e.g.
 sufficient. `ValidationRule`/`ValidationSpec` still need no hydration path
 — they never had one.
 
+## Sprint 11 addendum
+
+A new `relationship-config` rule type (`RelationshipConfigValidationRule`,
+`domain/validation.ts`) asserts a relationship's *full* configuration —
+`left`/`right` selectors, `cardinality`, `oneSide`, `crossFilterDirection`
+and `active` state, matched in either author-selector order — something the
+original `relationship` rule can't express, since it's hardcoded to a 1:*
+single-direction expectation. `evaluateRelationshipConfigRule`
+(`runtime/validation/structuralValidation.ts`) is the evaluator, following
+the same "resolve selectors, compare against `SemanticModel.relationships`,
+never reimplement relationship logic" pattern every other structural rule
+uses.
+
+The original `relationship` rule type is still fully supported, unchanged
+in behavior: `evaluateRelationshipRule` now goes through the
+`relationshipOneEndpoint`/`relationshipManyEndpoint` helpers
+(`runtime/model/relationshipHelpers.ts`, only ever defined for
+`one-to-many`) instead of reading `.one`/`.many` directly, but it's still
+exactly the same "does this specific 1 → * relationship exist, in the right
+direction, with the expected active state" check it always was — an
+existing exercise spec written against the `relationship` rule type needs
+no changes.
+
+The staleness fingerprint (`runtime/validation/fingerprint.ts`) now hashes
+`{ left, right, cardinality, oneSide, crossFilterDirection, active }` per
+relationship, replacing the old `{ one, many, active, cardinality }` shape
+— `crossFilterDirection` now participates in staleness detection, where it
+was previously silently omitted entirely (it was always the single literal
+`'single'` before Sprint 11, so omitting it couldn't have mattered; it can
+now).
+
 ## Known limitations
 
 - Only physical (dataset-schema) columns can appear in a `ColumnSelector` —

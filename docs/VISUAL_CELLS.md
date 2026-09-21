@@ -296,6 +296,19 @@ an intentional tradeoff, not an oversight: a future execution backend
 `evaluateMeasure` calls inside `grouping.ts` without changing any
 `VisualSpec`/`VisualCell` contract (brief §58).
 
+## Sprint 11 addendum
+
+Visual Cells needed **zero** relationship-specific code changes for Sprint 11
+(`git diff --stat` over `runtime/visual/*`/`components/visual/*` for the
+sprint is empty). A bidirectional relationship, a many-to-many bridge table,
+or a `USERELATIONSHIP`/`CROSSFILTER` measure just works on a KPI/Bar/Line/
+Table the moment it's created, for the same reason every other Sprint 8-10
+feature did: every Visual still calls only the unmodified `evaluateMeasure`,
+which is the one and only place relationship propagation happens. This is
+the whole point of the "runtime-truth reuse" discipline this layer has
+followed since Sprint 7 — see [`docs/ADVANCED_RELATIONSHIPS.md`](./ADVANCED_RELATIONSHIPS.md)
+and [`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md).
+
 ## Known limitations
 
 - **Visual dimensions are physical columns only.** `BarVisualSpec.category`/

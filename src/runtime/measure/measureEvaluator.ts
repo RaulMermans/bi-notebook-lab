@@ -6,7 +6,7 @@ import { bindMeasureExpression, type BoundMeasureExpression } from '../../expres
 import { parseExpression } from '../../expression/parser'
 import type { ExecutionTraceNode } from '../../expression/trace'
 import { collectIteratorCalculatedColumns, evaluateIteratorRowExpression, type IteratorEvalHelpers, type IteratorRowData } from '../iterator/iteratorEvaluator'
-import { buildRelatedIndex, resolveOneSideTable } from '../../expression/relatedLookup'
+import { buildRelatedIndex, resolveRelatedIndexAndKey } from '../../expression/relatedLookup'
 import { evaluateTableExpression, tableExpressionRowCount } from '../tableExpression/tableExpressionEvaluator'
 import { compareScalarValues } from './booleanFilter'
 import { computeAggregation, computeCountRows, computeIteratorAggregation } from './aggregation'
@@ -15,6 +15,7 @@ import {
   buildEffectiveContext,
   cloneEffectiveContext,
   toFilterContext,
+  toRelationshipState,
   toTableSelectionIndexes,
   type EffectiveContext,
   type FilterModifier,
@@ -451,7 +452,13 @@ function evaluateCalculate(
 
   const innerFilterContext = toFilterContext(nextEffectiveContext)
   const innerTableSelections = toTableSelectionIndexes(nextEffectiveContext)
-  const innerFilterState = resolveFilterContextUnchecked(ctx.model, ctx.datasets, innerFilterContext, innerTableSelections)
+  const innerFilterState = resolveFilterContextUnchecked(
+    ctx.model,
+    ctx.datasets,
+    innerFilterContext,
+    innerTableSelections,
+    toRelationshipState(nextEffectiveContext),
+  )
 
   const calcCtx: MeasureEvalContext = {
     model: ctx.model,
@@ -497,6 +504,19 @@ function buildModifierTraceNode(outcome: ReturnType<typeof applyFilterModifier>)
       label: outcome.label,
       metadata: { tableName: outcome.tableName, inputRows: outcome.inputRows, rowsMatched: outcome.rowsMatched },
       children: outcome.trace ? [outcome.trace] : undefined,
+    }
+  }
+  if (outcome.kind === 'RelationshipOverride') {
+    // The "Requested / Model state / Effective state / Suppressed" shape from sprint brief §52.
+    return {
+      kind: outcome.sourceFunction === 'CROSSFILTER' ? 'crossfilter' : 'userelationship',
+      label: outcome.label,
+      metadata: {
+        requested: outcome.requestedLabel,
+        modelState: outcome.modelStateLabel,
+        effectiveState: outcome.effectiveStateLabel,
+        suppressed: outcome.conflictingLabels ?? [],
+      },
     }
   }
   return { kind: 'remove-filters', label: outcome.label, metadata: { removed: outcome.removedLabels ?? [] } }
@@ -566,12 +586,16 @@ function evaluateIteratorCall(node: Extract<BoundMeasureExpression, { kind: 'Ite
   }
 
   const relatedIndexCache = new Map<string, Map<unknown, Record<string, unknown>> | undefined>()
-  const getRelatedIndex = (relationshipId: string): Map<unknown, Record<string, unknown>> | undefined => {
-    if (relatedIndexCache.has(relationshipId)) return relatedIndexCache.get(relationshipId)
+  const getRelatedIndex = (
+    relationshipId: string,
+    targetColumnRef: { datasetId: string; tableId: string; columnId: string },
+  ): Map<unknown, Record<string, unknown>> | undefined => {
+    const cacheKey = `${relationshipId}:${targetColumnRef.datasetId}:${targetColumnRef.tableId}`
+    if (relatedIndexCache.has(cacheKey)) return relatedIndexCache.get(cacheKey)
     const relationship = ctx.model.relationships.find((r) => r.id === relationshipId)
-    const oneSide = relationship ? resolveOneSideTable(ctx.datasets, relationship) : undefined
-    const index = oneSide ? buildRelatedIndex(oneSide.table, oneSide.column) : undefined
-    relatedIndexCache.set(relationshipId, index)
+    const resolved = relationship ? resolveRelatedIndexAndKey(ctx.datasets, relationship, targetColumnRef) : undefined
+    const index = resolved ? buildRelatedIndex(resolved.indexTable, resolved.indexColumn) : undefined
+    relatedIndexCache.set(cacheKey, index)
     return index
   }
 
@@ -677,7 +701,13 @@ function evaluateIteratorMeasureReference(
 
   const innerFilterContext = toFilterContext(nextEffectiveContext)
   const innerTableSelections = toTableSelectionIndexes(nextEffectiveContext)
-  const innerFilterState = resolveFilterContextUnchecked(ctx.model, ctx.datasets, innerFilterContext, innerTableSelections)
+  const innerFilterState = resolveFilterContextUnchecked(
+    ctx.model,
+    ctx.datasets,
+    innerFilterContext,
+    innerTableSelections,
+    toRelationshipState(nextEffectiveContext),
+  )
 
   const nestedCtx: MeasureEvalContext = {
     model: ctx.model,

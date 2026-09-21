@@ -470,11 +470,11 @@ describe('CALCULATE + relationship active/inactive (sprint brief §22 manual tes
     const withM = withMeasure(model, datasets, salesTableId, 'Premium Product Revenue', 'CALCULATE([Total Revenue], FILTER(Products, Products[UnitPrice] > 100))')
 
     const unfiltered = evaluateMeasure(withM, datasets, findMeasureId(withM, 'Total Revenue'))
-    const disabled = setRelationshipActive(withM, productRelationshipId, false)
+    const { model: disabled } = setRelationshipActive(withM, productRelationshipId, false)
     const disabledExecution = evaluateMeasure(disabled, datasets, findMeasureId(disabled, 'Premium Product Revenue'))
     expect(disabledExecution.value).toBe(unfiltered.value)
 
-    const reEnabled = setRelationshipActive(disabled, productRelationshipId, true)
+    const { model: reEnabled } = setRelationshipActive(disabled, productRelationshipId, true)
     const reEnabledExecution = evaluateMeasure(reEnabled, datasets, findMeasureId(reEnabled, 'Premium Product Revenue'))
     expect(reEnabledExecution.value).toBe(180)
   })

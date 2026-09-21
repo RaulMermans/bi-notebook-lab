@@ -1,7 +1,8 @@
 import type { Dataset } from '../../domain/data'
 import type { SemanticModel } from '../../domain/model'
-import type { ModelHealthValidationRule, RelationshipValidationRule, TablePresenceValidationRule } from '../../domain/validation'
+import type { ModelHealthValidationRule, RelationshipConfigValidationRule, RelationshipValidationRule, TablePresenceValidationRule } from '../../domain/validation'
 import { validateModel } from '../model/graphAnalysis'
+import { relationshipManyEndpoint, relationshipOneEndpoint } from '../model/relationshipHelpers'
 import { classifySelectorFailure, resolveColumnSelector, resolveTableSelector } from './selectorResolver'
 import type { RuleEvaluationResult } from './types'
 
@@ -48,10 +49,13 @@ export function evaluateRelationshipRule(
   const one = oneResolution.value
   const many = manyResolution.value
 
-  const matchesSide = (side: { datasetId: string; tableId: string; columnId: string }, resolved: typeof one) =>
-    side.datasetId === resolved.datasetId && side.tableId === resolved.tableId && side.columnId === resolved.columnId
+  const matchesSide = (side: { datasetId: string; tableId: string; columnId: string } | undefined, resolved: typeof one) =>
+    side !== undefined && side.datasetId === resolved.datasetId && side.tableId === resolved.tableId && side.columnId === resolved.columnId
 
-  const forward = model.relationships.find((r) => matchesSide(r.one, one) && matchesSide(r.many, many))
+  // Only ever matches a one-to-many relationship — `relationshipOneEndpoint`/`relationshipManyEndpoint`
+  // are `undefined` for one-to-one/many-to-many, so this rule stays exactly what it always was: a
+  // "does this specific 1 -> * relationship exist" check (docs/VALIDATION_ENGINE.md "Backward compatibility").
+  const forward = model.relationships.find((r) => matchesSide(relationshipOneEndpoint(r), one) && matchesSide(relationshipManyEndpoint(r), many))
   if (forward) {
     const expectedActive = rule.active ?? true
     if (forward.active !== expectedActive) {
@@ -77,7 +81,7 @@ export function evaluateRelationshipRule(
     }
   }
 
-  const reversed = model.relationships.find((r) => matchesSide(r.one, many) && matchesSide(r.many, one))
+  const reversed = model.relationships.find((r) => matchesSide(relationshipOneEndpoint(r), many) && matchesSide(relationshipManyEndpoint(r), one))
   if (reversed) {
     return {
       status: 'failed',
@@ -104,6 +108,94 @@ export function evaluateRelationshipRule(
         message: `No relationship connects "${one.tableName}[${one.columnName}]" (1) to "${many.tableName}[${many.columnName}]" (*) yet.`,
       },
     ],
+  }
+}
+
+/**
+ * Sprint 11: checks a relationship's full configuration — cardinality,
+ * one-side orientation, cross-filter direction and active state — matching
+ * `left`/`right` in either author-selector order. See
+ * `RelationshipConfigValidationRule` (domain/validation.ts) for why this is
+ * a separate rule from `evaluateRelationshipRule` rather than an extension
+ * of it (docs/ADVANCED_RELATIONSHIPS.md "Validation").
+ */
+export function evaluateRelationshipConfigRule(
+  rule: RelationshipConfigValidationRule,
+  model: SemanticModel,
+  datasets: Record<string, Dataset>,
+): RuleEvaluationResult {
+  const leftResolution = resolveColumnSelector(model, datasets, rule.left)
+  if (!leftResolution.ok) {
+    if (classifySelectorFailure(leftResolution.error) === 'failed') {
+      return { status: 'failed', pointsEarned: 0, feedback: [{ severity: 'error', code: 'RELATIONSHIP_TABLE_MISSING', message: leftResolution.error.message }] }
+    }
+    return configError(`Relationship rule "${rule.title}": ${leftResolution.error.message}`)
+  }
+
+  const rightResolution = resolveColumnSelector(model, datasets, rule.right)
+  if (!rightResolution.ok) {
+    if (classifySelectorFailure(rightResolution.error) === 'failed') {
+      return { status: 'failed', pointsEarned: 0, feedback: [{ severity: 'error', code: 'RELATIONSHIP_TABLE_MISSING', message: rightResolution.error.message }] }
+    }
+    return configError(`Relationship rule "${rule.title}": ${rightResolution.error.message}`)
+  }
+
+  const left = leftResolution.value
+  const right = rightResolution.value
+  const matches = (side: { datasetId: string; tableId: string; columnId: string }, resolved: typeof left) =>
+    side.datasetId === resolved.datasetId && side.tableId === resolved.tableId && side.columnId === resolved.columnId
+
+  const forward = model.relationships.find((r) => matches(r.left, left) && matches(r.right, right))
+  const reversed = model.relationships.find((r) => matches(r.left, right) && matches(r.right, left))
+  const found = forward ?? reversed
+  const swapped = !forward && Boolean(reversed)
+
+  if (!found) {
+    return {
+      status: 'failed',
+      pointsEarned: 0,
+      feedback: [
+        {
+          severity: 'error',
+          code: 'RELATIONSHIP_MISSING',
+          message: `No relationship connects "${left.tableName}[${left.columnName}]" and "${right.tableName}[${right.columnName}]" yet.`,
+        },
+      ],
+    }
+  }
+
+  const problems: string[] = []
+  if (found.cardinality !== rule.cardinality) problems.push(`expected cardinality "${rule.cardinality}", found "${found.cardinality}"`)
+  const expectedOneSide = rule.oneSide && swapped ? (rule.oneSide === 'left' ? 'right' : 'left') : rule.oneSide
+  if (rule.cardinality === 'one-to-many' && expectedOneSide && found.oneSide !== expectedOneSide) {
+    problems.push(`the "1" side is on the wrong table`)
+  }
+  if (found.crossFilterDirection !== rule.crossFilterDirection) {
+    problems.push(`expected cross-filter direction "${rule.crossFilterDirection}", found "${found.crossFilterDirection}"`)
+  }
+  const expectedActive = rule.active ?? true
+  if (found.active !== expectedActive) problems.push(`should be ${expectedActive ? 'active' : 'inactive'}, is currently ${found.active ? 'active' : 'inactive'}`)
+
+  if (problems.length > 0) {
+    return {
+      status: 'failed',
+      pointsEarned: 0,
+      feedback: [
+        {
+          severity: 'error',
+          code: 'RELATIONSHIP_CONFIG_MISMATCH',
+          message: `The relationship between "${left.tableName}[${left.columnName}]" and "${right.tableName}[${right.columnName}]" doesn't match: ${problems.join('; ')}.`,
+        },
+      ],
+      evidence: { relationshipId: found.id },
+    }
+  }
+
+  return {
+    status: 'passed',
+    pointsEarned: rule.points,
+    feedback: [{ severity: 'success', code: 'RELATIONSHIP_OK', message: `${rule.title} is correct.` }],
+    evidence: { relationshipId: found.id },
   }
 }
 

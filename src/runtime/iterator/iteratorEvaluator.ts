@@ -30,7 +30,7 @@ export interface IteratorRowEvalResult {
  */
 export interface IteratorEvalHelpers {
   getCalculatedVector(columnId: string): unknown[]
-  getRelatedIndex(relationshipId: string): Map<unknown, Record<string, unknown>> | undefined
+  getRelatedIndex(relationshipId: string, targetColumnRef: { datasetId: string; tableId: string; columnId: string }): Map<unknown, Record<string, unknown>> | undefined
   evaluateMeasureReference(measureId: string, measureName: string, rowData: IteratorRowData): { value: unknown; diagnostics: ExpressionDiagnostic[]; trace: ExecutionTraceNode }
 }
 
@@ -157,7 +157,7 @@ export function evaluateIteratorRowExpression(node: BoundIteratorExpression, row
       if (rowData.kind !== 'model' || !rowData.row) {
         return { value: null, diagnostics: [], trace: { kind: 'related-lookup', label: node.label, value: null, metadata: { matched: false } } }
       }
-      const index = helpers.getRelatedIndex(node.relationshipId)
+      const index = helpers.getRelatedIndex(node.relationshipId, node.targetColumnRef)
       const foreignKeyValue = rowData.row[node.manyColumnName] ?? null
       const matchedRow = index && foreignKeyValue !== null ? index.get(foreignKeyValue) : undefined
       const value = matchedRow ? (matchedRow[node.targetColumnName] ?? null) : null

@@ -101,7 +101,7 @@ describe('modelRuntime', () => {
     model = result.model
     const relationshipId = result.relationship!.id
 
-    model = setRelationshipActive(model, relationshipId, false)
+    model = setRelationshipActive(model, relationshipId, false).model
     expect(model.relationships[0].active).toBe(false)
 
     model = removeRelationship(model, relationshipId)

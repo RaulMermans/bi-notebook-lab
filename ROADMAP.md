@@ -352,6 +352,66 @@ details, architecture, and known DAX compatibility limitations.
 
 ---
 
+## Phase 8.7 — Advanced Relationships & USERELATIONSHIP/CROSSFILTER ✅ complete
+
+> Referred to as "Sprint 11" in its own implementation brief.
+
+- `Relationship` migrated from a hardcoded `one-to-many`/single-direction
+  shape to a generic one: `cardinality: 'one-to-many' | 'one-to-one' |
+  'many-to-many'`, `crossFilterDirection: 'left-to-right' | 'right-to-left' |
+  'both'`, `left`/`right` endpoints (no field named `one`/`many` on the
+  canonical type) — legacy models hydrate to the numerically identical old
+  behavior with zero learner-visible change
+- a single centralized orientation module (`runtime/model/
+  relationshipHelpers.ts`) every runtime file routes through instead of
+  reading `.left`/`.right` and re-deriving "which side is the one/many side"
+  independently
+- a generic, edge-based filter-propagation engine
+  (`relationshipPropagationEdges`/`propagate()`) — `1 → *`, `* → 1`, `1 ↔ 1`
+  and `* → *` all reduce to the same "key membership" step, so there is no
+  cardinality-specific propagation algorithm to maintain
+- `ACTIVE_CYCLE` retired entirely (a legal bidirectional relationship is a
+  2-node directed cycle, so simple cycle detection is the wrong tool);
+  replaced by directed `AMBIGUOUS_FILTER_PATH` detection (more than one
+  distinct directed propagation path between an ordered table pair), which
+  never flags a legal bidirectional relationship or a directed cycle
+- multiple relationships between the same table pair (role-playing
+  dimensions, e.g. Order Date/Ship Date, one active) fully supported, with
+  pedagogical model-wide diagnostics (`MULTIPLE_RELATIONSHIPS_BETWEEN_TABLES`,
+  `ROLE_PLAYING_RELATIONSHIP_PATTERN`, `INACTIVE_RELATIONSHIP`)
+- `setRelationshipActive` fails closed (clone-validate-commit,
+  `{model, diagnostics}`) instead of unconditionally flipping a boolean, so
+  activating a relationship can never silently introduce ambiguity
+- `USERELATIONSHIP`/`CROSSFILTER` as `CALCULATE` filter modifiers, sharing
+  one `RelationshipOverrideModifier` implementation: temporarily activate,
+  suppress, or redirect a relationship for one calculation only, never the
+  persisted model, with automatic sibling suppression so switching to
+  Ship Date replaces Order Date rather than intersecting with it
+- `USERELATIONSHIP`/`CROSSFILTER` compose for free with `SAMEPERIODLASTYEAR`/
+  time intelligence and every Visual Cell — zero new code in either layer
+- `RELATED` now supports one-to-one lookups (valid in either direction) and
+  explicitly rejects many-to-many with `RELATED_UNSUPPORTED_CARDINALITY`
+  (never picks an arbitrary row)
+- a new `relationship-config` validation rule type for grading a
+  relationship's full cardinality/direction/active configuration, alongside
+  the still-supported classic 1:* `relationship` rule
+- a seeded Relationship Lab sample dataset exercising every scenario (1:1,
+  *:*, role-playing dates) with real data, loadable alongside the Retail
+  sample
+- verified end-to-end against both the Retail sample and the Relationship
+  Lab dataset, including nested `CALCULATE`/`USERELATIONSHIP` scoping,
+  cache-context safety, and the `USERELATIONSHIP` + `SAMEPERIODLASTYEAR`
+  composition the sprint brief calls out explicitly
+
+**Exit:** the relationship model now covers the modeling scenarios a real
+Power BI learner needs — role-playing dimensions, 1:1 lookups, *:* bridge
+tables, bidirectional filtering, and runtime relationship switching. See
+[`docs/ADVANCED_RELATIONSHIPS.md`](./docs/ADVANCED_RELATIONSHIPS.md) and
+[`docs/USERELATIONSHIP.md`](./docs/USERELATIONSHIP.md) for implementation
+details, architecture, and known Power BI compatibility boundaries.
+
+---
+
 ## Phase 9 — Learning System
 
 - lesson catalog
@@ -380,12 +440,11 @@ details, architecture, and known DAX compatibility limitations.
 
 ## Later, only if validated
 
-- advanced relationships & modeling — 1:1, many-to-many, bidirectional
-  filtering, inactive date relationships, `USERELATIONSHIP`, role-playing
-  Date dimensions, multiple fact tables, relationship ambiguity practice
-  (recommended next, now that Phase 8.6's Date Table foundation exists — see
-  [`docs/TIME_INTELLIGENCE.md`](./docs/TIME_INTELLIGENCE.md) "Known DAX
-  compatibility limitations")
+- **Power Query & Data Transformation Runtime** (recommended next, now that
+  Phase 8.7's generic relationship model exists) — rename/remove columns,
+  change types, filter rows, replace values, remove duplicates, group by,
+  and merge/append queries, as a learnable pre-model data-shaping step
+  ahead of the existing import pipeline.
 - custom datasets
 - shareable notebooks
 - desktop wrapper

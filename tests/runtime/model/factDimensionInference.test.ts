@@ -14,10 +14,11 @@ function withTables(names: string[]): SemanticModel {
 function relationship(oneDataset: string, manyDataset: string): Relationship {
   return {
     id: `${manyDataset}->${oneDataset}`,
-    one: { datasetId: oneDataset, tableId: `${oneDataset}-table`, columnId: `${oneDataset}-col` },
-    many: { datasetId: manyDataset, tableId: `${manyDataset}-table`, columnId: `${manyDataset}-col` },
+    left: { datasetId: oneDataset, tableId: `${oneDataset}-table`, columnId: `${oneDataset}-col` },
+    right: { datasetId: manyDataset, tableId: `${manyDataset}-table`, columnId: `${manyDataset}-col` },
     cardinality: 'one-to-many',
-    crossFilterDirection: 'single',
+    oneSide: 'left',
+    crossFilterDirection: 'left-to-right',
     active: true,
     createdAt: new Date().toISOString(),
   }

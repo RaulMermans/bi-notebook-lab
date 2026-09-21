@@ -113,6 +113,7 @@ export default function App() {
                 onRemoveTableFromModel={actions.removeTableFromModel}
                 onMoveModelTable={actions.moveModelTable}
                 onCreateRelationship={actions.createRelationship}
+                onUpdateRelationship={actions.updateRelationship}
                 onRemoveRelationship={actions.removeRelationship}
                 onSetRelationshipActive={actions.setRelationshipActive}
                 onMarkDateTable={actions.markDateTable}

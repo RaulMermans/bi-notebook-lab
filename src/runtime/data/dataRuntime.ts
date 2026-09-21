@@ -3,6 +3,7 @@ import { DataImportError } from '../../lib/errors'
 import { parseCsvText } from '../../lib/csv/parseCsv'
 import { generateId } from '../../lib/ids'
 import { generateRetailDataset } from '../../lib/sample/generateRetailDataset'
+import { generateRelationshipLabDataset } from '../../lib/sample/generateRelationshipLabDataset'
 
 function tableNameFromFileName(fileName: string): string {
   return fileName.replace(/\.[^./]+$/, '') || fileName
@@ -80,4 +81,8 @@ export async function importWorkbookSheets(file: File, sheetNames: string[]): Pr
 
 export function loadSampleRetailDataset(): Dataset[] {
   return generateRetailDataset()
+}
+
+export function loadSampleRelationshipLabDataset(): Dataset[] {
+  return generateRelationshipLabDataset()
 }

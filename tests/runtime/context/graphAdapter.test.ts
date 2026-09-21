@@ -18,7 +18,7 @@ describe('graphAdapter (diagram state)', () => {
     expect(tables.find((t) => t.modelTableId === customersTableId)!.filterState).toBe('direct')
     expect(tables.find((t) => t.modelTableId === salesTableId)!.filterState).toBe('propagated')
 
-    const relationship = relationships.find((r) => r.oneModelTableId === customersTableId && r.manyModelTableId === salesTableId)!
+    const relationship = relationships.find((r) => r.leftModelTableId === customersTableId && r.rightModelTableId === salesTableId)!
     expect(relationship.state).toBe('propagated')
   })
 
@@ -37,7 +37,7 @@ describe('graphAdapter (diagram state)', () => {
 
   it('marks an inactive relationship INACTIVE and leaves the many side unfiltered by it', () => {
     const { model, datasets, productsTableId, salesTableId, productRelationshipId, categoryColumn } = buildStarSchemaFixture()
-    const disabled = setRelationshipActive(model, productRelationshipId, false)
+    const { model: disabled } = setRelationshipActive(model, productRelationshipId, false)
     const filterContext = {
       filters: [{ column: { datasetId: 'products-ds', tableId: 'products-table', columnId: categoryColumn.id }, operator: 'equals' as const, values: ['Furniture'] }],
     }
@@ -59,7 +59,7 @@ describe('graphAdapter (diagram state)', () => {
 
     expect(relationships.every((r) => r.active)).toBe(true)
     expect(relationships.every((r) => r.state === 'active-no-effect')).toBe(true)
-    expect(relationships.every((r) => !r.propagated)).toBe(true)
+    expect(relationships.every((r) => r.propagation.length === 0)).toBe(true)
   })
 
   it('reuses ModelTable.position when present, and moving a table never changes visible-row counts', () => {

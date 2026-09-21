@@ -1,9 +1,14 @@
 import type { Dataset } from '../../domain/data'
-import type { ColumnRef, SemanticModel } from '../../domain/model'
+import type { ColumnRef, CrossFilterDirection, SemanticModel } from '../../domain/model'
 import type { ExpressionDiagnostic } from '../../expression/diagnostics'
 import type { ExecutionTraceNode } from '../../expression/trace'
 import { modelTableFor } from '../model/graphAnalysis'
 import { resolveTableRef } from '../model/modelRuntime'
+import {
+  cloneRelationshipState,
+  createEmptyRelationshipState,
+  type EffectiveRelationshipState,
+} from '../model/relationshipHelpers'
 import { computeTimeIntelligenceRowIndexes } from '../timeIntelligence/timeIntelligenceEvaluator'
 import { evaluateTableExpression, tableExpressionRowIndexSet } from '../tableExpression/tableExpressionEvaluator'
 import type { BoundFilterTable, BoundTimeIntelligenceTable } from '../tableExpression/tableExpressionTypes'
@@ -78,6 +83,38 @@ export interface DateTableReplaceModifier {
   label: string
 }
 
+/**
+ * Sprint 11: `USERELATIONSHIP`/`CROSSFILTER` (sprint brief §22-§34) — a
+ * scoped override of which relationship is effectively active, and in which
+ * direction it filters, for *this* `CALCULATE` call only. Never mutates the
+ * persisted `SemanticModel`; folds into `EffectiveContext.relationshipState`
+ * exactly like every other modifier folds into `columnFilters`/
+ * `tableSelections`, so nested-CALCULATE scoping and cache-context-safety
+ * fall out of the existing clone-per-scope machinery for free. Everything
+ * needed to build the "Requested / Model state / Suppressed" trace (sprint
+ * brief §52) is resolved once at bind time, not recomputed at apply time.
+ */
+export interface RelationshipOverrideModifier {
+  kind: 'RelationshipOverride'
+  sourceFunction: 'USERELATIONSHIP' | 'CROSSFILTER'
+  relationshipId: string
+  action: 'activate' | 'suppress' | 'direction'
+  /**
+   * Only for `action: 'direction'` — one or two single directions (never the
+   * literal `'both'`): a 1:1 `USERELATIONSHIP` sets exactly one (bounded
+   * semantics, sprint brief §31 — two opposing modifiers in one CALCULATE
+   * union via the `Set` in `EffectiveRelationshipState.directionOverrides`);
+   * `CROSSFILTER(..., BOTH)` sets both in one application.
+   */
+  directions?: Exclude<CrossFilterDirection, 'both'>[]
+  /** Sibling relationships (same endpoint table pair) to suppress alongside this override (sprint brief §27) — empty for `CROSSFILTER(..., NONE)`, which only suppresses itself. */
+  conflictingRelationshipIds: string[]
+  requestedLabel: string
+  modelStateLabel: string
+  conflictingLabels: string[]
+  label: string
+}
+
 export type FilterModifier =
   | ReplaceColumnFilterModifier
   | PredicateFilterModifier
@@ -85,6 +122,7 @@ export type FilterModifier =
   | RemoveTablesModifier
   | ClearAllFiltersModifier
   | DateTableReplaceModifier
+  | RelationshipOverrideModifier
 
 export interface EffectiveTableSelection {
   modelTableId: string
@@ -99,6 +137,8 @@ export interface EffectiveTableSelection {
 export interface EffectiveContext {
   columnFilters: Map<string, ColumnFilter>
   tableSelections: Map<string, EffectiveTableSelection>
+  /** Sprint 11: scoped `USERELATIONSHIP`/`CROSSFILTER` overrides — see `RelationshipOverrideModifier`. */
+  relationshipState: EffectiveRelationshipState
 }
 
 function columnKey(ref: ColumnRef): string {
@@ -106,7 +146,15 @@ function columnKey(ref: ColumnRef): string {
 }
 
 export function cloneEffectiveContext(ctx: EffectiveContext): EffectiveContext {
-  return { columnFilters: new Map(ctx.columnFilters), tableSelections: new Map(ctx.tableSelections) }
+  return {
+    columnFilters: new Map(ctx.columnFilters),
+    tableSelections: new Map(ctx.tableSelections),
+    relationshipState: cloneRelationshipState(ctx.relationshipState),
+  }
+}
+
+export function toRelationshipState(ctx: EffectiveContext): EffectiveRelationshipState {
+  return ctx.relationshipState
 }
 
 /**
@@ -131,7 +179,7 @@ export function buildEffectiveContext(filterContext: FilterContext): EffectiveCo
     const intersected = filter.values.filter((value) => existingValues.has(value))
     columnFilters.set(key, { column: filter.column, operator: intersected.length <= 1 ? 'equals' : 'in', values: intersected })
   }
-  return { columnFilters, tableSelections: new Map() }
+  return { columnFilters, tableSelections: new Map(), relationshipState: createEmptyRelationshipState() }
 }
 
 export function toFilterContext(ctx: EffectiveContext): FilterContext {
@@ -163,6 +211,12 @@ export interface ModifierOutcome {
   diagnostics?: ExpressionDiagnostic[]
   /** Sprint 10: `DateTableReplace`'s rich date-shift trace (sprint brief §46) — built by `computeTimeIntelligenceRowIndexes`, surfaced as-is rather than re-derived. */
   trace?: ExecutionTraceNode
+  /** Sprint 11: `RelationshipOverride`'s "Requested / Model state / Effective state / Suppressed" trace fields (sprint brief §52). */
+  sourceFunction?: 'USERELATIONSHIP' | 'CROSSFILTER'
+  requestedLabel?: string
+  modelStateLabel?: string
+  effectiveStateLabel?: string
+  conflictingLabels?: string[]
 }
 
 /**
@@ -330,6 +384,39 @@ export function applyFilterModifier(
         inputRows,
         rowsMatched: computed.rowIndexes.size,
         trace: computed.trace,
+      }
+    }
+
+    case 'RelationshipOverride': {
+      for (const id of modifier.conflictingRelationshipIds) ctx.relationshipState.suppressedRelationshipIds.add(id)
+
+      let effectiveStateLabel: string
+      if (modifier.action === 'suppress') {
+        ctx.relationshipState.suppressedRelationshipIds.add(modifier.relationshipId)
+        ctx.relationshipState.activatedRelationshipIds.delete(modifier.relationshipId)
+        ctx.relationshipState.directionOverrides.delete(modifier.relationshipId)
+        effectiveStateLabel = 'Disabled for this calculation'
+      } else {
+        ctx.relationshipState.suppressedRelationshipIds.delete(modifier.relationshipId)
+        ctx.relationshipState.activatedRelationshipIds.add(modifier.relationshipId)
+        if (modifier.action === 'direction' && modifier.directions && modifier.directions.length > 0) {
+          const existing = ctx.relationshipState.directionOverrides.get(modifier.relationshipId) ?? new Set()
+          for (const direction of modifier.directions) existing.add(direction)
+          ctx.relationshipState.directionOverrides.set(modifier.relationshipId, existing)
+          effectiveStateLabel = existing.size > 1 ? 'Active for this calculation (both directions)' : `Active for this calculation (${[...existing][0]})`
+        } else {
+          effectiveStateLabel = 'Active for this calculation'
+        }
+      }
+
+      return {
+        kind: modifier.kind,
+        label: modifier.label,
+        sourceFunction: modifier.sourceFunction,
+        requestedLabel: modifier.requestedLabel,
+        modelStateLabel: modifier.modelStateLabel,
+        effectiveStateLabel,
+        conflictingLabels: modifier.conflictingLabels,
       }
     }
   }

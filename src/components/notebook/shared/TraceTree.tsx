@@ -13,8 +13,12 @@ function noteFor(node: ExecutionTraceNode): string | undefined {
     return `${(node.metadata.visibleRows as number).toLocaleString()} / ${(node.metadata.totalRows as number).toLocaleString()} rows`
   }
 
-  if (node.kind === 'relationship-propagation' && typeof node.metadata?.manyRowsBefore === 'number') {
-    return `${(node.metadata.manyRowsBefore as number).toLocaleString()} → ${(node.metadata.manyRowsAfter as number).toLocaleString()} rows`
+  if (node.kind === 'relationship-propagation' && typeof node.metadata?.targetRowsBefore === 'number') {
+    return `${(node.metadata.targetRowsBefore as number).toLocaleString()} → ${(node.metadata.targetRowsAfter as number).toLocaleString()} rows`
+  }
+
+  if ((node.kind === 'userelationship' || node.kind === 'crossfilter') && typeof node.metadata?.effectiveState === 'string') {
+    return node.metadata.effectiveState as string
   }
 
   if (node.kind === 'filter-context' && typeof node.metadata?.rowsAfter === 'number') {

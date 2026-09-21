@@ -56,10 +56,11 @@ function productsDataset(): Dataset {
 function relationship(): Relationship {
   return {
     id: 'rel-1',
-    one: { datasetId: 'products-ds', tableId: 'products-table', columnId: 'products-id' },
-    many: { datasetId: 'sales-ds', tableId: 'sales-table', columnId: 'sales-productid' },
+    left: { datasetId: 'products-ds', tableId: 'products-table', columnId: 'products-id' },
+    right: { datasetId: 'sales-ds', tableId: 'sales-table', columnId: 'sales-productid' },
     cardinality: 'one-to-many',
-    crossFilterDirection: 'single',
+    oneSide: 'left',
+    crossFilterDirection: 'left-to-right',
     active: true,
     createdAt: new Date().toISOString(),
   }

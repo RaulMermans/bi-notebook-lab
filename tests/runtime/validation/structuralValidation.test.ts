@@ -34,19 +34,53 @@ function buildCyclicModel(): { model: SemanticModel; datasets: Record<string, Da
     measures: [],
     relationships: [
       {
-        id: 'rel-a-to-b', cardinality: 'one-to-many', crossFilterDirection: 'single', active: true, createdAt: new Date().toISOString(),
-        one: { datasetId: 'ds-a', tableId: 'table-a', columnId: 'a-key' },
-        many: { datasetId: 'ds-b', tableId: 'table-b', columnId: 'b-akey' },
+        id: 'rel-a-to-b', cardinality: 'one-to-many', oneSide: 'left', crossFilterDirection: 'left-to-right', active: true, createdAt: new Date().toISOString(),
+        left: { datasetId: 'ds-a', tableId: 'table-a', columnId: 'a-key' },
+        right: { datasetId: 'ds-b', tableId: 'table-b', columnId: 'b-akey' },
       },
       {
-        id: 'rel-b-to-a', cardinality: 'one-to-many', crossFilterDirection: 'single', active: true, createdAt: new Date().toISOString(),
-        one: { datasetId: 'ds-b', tableId: 'table-b', columnId: 'b-key' },
-        many: { datasetId: 'ds-a', tableId: 'table-a', columnId: 'a-bkey' },
+        id: 'rel-b-to-a', cardinality: 'one-to-many', oneSide: 'left', crossFilterDirection: 'left-to-right', active: true, createdAt: new Date().toISOString(),
+        left: { datasetId: 'ds-b', tableId: 'table-b', columnId: 'b-key' },
+        right: { datasetId: 'ds-a', tableId: 'table-a', columnId: 'a-bkey' },
       },
     ],
   }
 
   return { model, datasets: { [datasetA.id]: datasetA, [datasetB.id]: datasetB } }
+}
+
+/** A three-table model with a genuine diamond (A -> B -> C and A -> C directly) — two distinct propagation paths from A to C, which is what Sprint 11's AMBIGUOUS_FILTER_PATH actually detects (unlike the legal two-table cycle above). */
+function buildDiamondModel(): { model: SemanticModel; datasets: Record<string, Dataset> } {
+  const { model: cyclic, datasets } = buildCyclicModel()
+  const datasetC: Dataset = {
+    id: 'ds-c', name: 'C', source: { type: 'sample', key: 'c' },
+    tables: [{ id: 'table-c', name: 'C', columns: [
+      { id: 'c-akey', name: 'AKey', dataType: 'integer', nullable: false },
+      { id: 'c-bkey', name: 'BKey', dataType: 'integer', nullable: false },
+    ], rows: [{ AKey: 1, BKey: 1 }], rowCount: 1 }],
+    createdAt: new Date().toISOString(),
+  }
+
+  const model: SemanticModel = {
+    ...cyclic,
+    tables: [...cyclic.tables, { id: 'mt-c', datasetId: 'ds-c', tableId: 'table-c' }],
+    relationships: [
+      // Keep only the legal a->b edge from the cyclic fixture (drop b->a so this is a clean diamond, not also a cycle).
+      cyclic.relationships[0],
+      {
+        id: 'rel-a-to-c', cardinality: 'one-to-many', oneSide: 'left', crossFilterDirection: 'left-to-right', active: true, createdAt: new Date().toISOString(),
+        left: { datasetId: 'ds-a', tableId: 'table-a', columnId: 'a-key' },
+        right: { datasetId: 'ds-c', tableId: 'table-c', columnId: 'c-akey' },
+      },
+      {
+        id: 'rel-b-to-c', cardinality: 'one-to-many', oneSide: 'left', crossFilterDirection: 'left-to-right', active: true, createdAt: new Date().toISOString(),
+        left: { datasetId: 'ds-b', tableId: 'table-b', columnId: 'b-key' },
+        right: { datasetId: 'ds-c', tableId: 'table-c', columnId: 'c-bkey' },
+      },
+    ],
+  }
+
+  return { model, datasets: { ...datasets, [datasetC.id]: datasetC } }
 }
 
 describe('structuralValidation', () => {
@@ -98,7 +132,7 @@ describe('structuralValidation', () => {
 
   it('fails when active is expected but the relationship is inactive', () => {
     const { model, datasets, customerRelationshipId } = buildRetailModel()
-    const disabled = setRelationshipActive(model, customerRelationshipId, false)
+    const { model: disabled } = setRelationshipActive(model, customerRelationshipId, false)
     const result = evaluateRelationshipRule(
       {
         id: 'rel', type: 'relationship', title: 'Customers → Sales', points: 10,
@@ -138,15 +172,25 @@ describe('structuralValidation', () => {
     expect(result.status).toBe('passed')
   })
 
-  it('fails model health when the active relationship graph has a cycle', () => {
+  it('a directed cycle among active relationships is legal and passes model health (ACTIVE_CYCLE is retired, sprint brief §15)', () => {
     const { model, datasets } = buildCyclicModel()
     const result = evaluateModelHealthRule(
       { id: 'health', type: 'model-health', title: 'Valid graph', points: 10, requireValidGraph: true },
       model,
       datasets,
     )
+    expect(result.status).toBe('passed')
+  })
+
+  it('fails model health when the active relationship graph has an ambiguous path (a diamond)', () => {
+    const { model, datasets } = buildDiamondModel()
+    const result = evaluateModelHealthRule(
+      { id: 'health', type: 'model-health', title: 'Valid graph', points: 10, requireValidGraph: true },
+      model,
+      datasets,
+    )
     expect(result.status).toBe('failed')
-    expect(result.feedback.some((f) => f.code === 'ACTIVE_CYCLE')).toBe(true)
+    expect(result.feedback.some((f) => f.code === 'AMBIGUOUS_FILTER_PATH')).toBe(true)
   })
 
   it('table-present rule passes once the table has been added to the model', () => {

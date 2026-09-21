@@ -31,21 +31,28 @@ function deriveEdges(
   selectedRelationshipId: string | undefined,
   onSelectRelationship: (id: string) => void,
 ): Edge[] {
-  return relationships.map((relationship) => ({
-    id: relationship.relationshipId,
-    source: relationship.manyModelTableId,
-    target: relationship.oneModelTableId,
-    type: 'contextRelationship',
-    data: {
-      state: relationship.state,
-      oneColumnName: relationship.oneColumnName,
-      manyColumnName: relationship.manyColumnName,
-      manyRowsBefore: relationship.manyRowsBefore,
-      manyRowsAfter: relationship.manyRowsAfter,
-      selected: relationship.relationshipId === selectedRelationshipId,
-      onSelect: onSelectRelationship,
-    },
-  })) as ContextRelationshipEdgeType[]
+  return relationships.map((relationship) => {
+    const first = relationship.propagation[0]
+    return {
+      id: relationship.relationshipId,
+      source: relationship.leftModelTableId,
+      target: relationship.rightModelTableId,
+      type: 'contextRelationship',
+      data: {
+        state: relationship.state,
+        leftColumnName: relationship.leftColumnName,
+        rightColumnName: relationship.rightColumnName,
+        cardinality: relationship.cardinality,
+        oneSide: relationship.oneSide,
+        crossFilterDirection: relationship.crossFilterDirection,
+        overridden: relationship.overrideReason !== undefined,
+        totalRowsBefore: first?.targetRowsBefore,
+        totalRowsAfter: first?.targetRowsAfter,
+        selected: relationship.relationshipId === selectedRelationshipId,
+        onSelect: onSelectRelationship,
+      },
+    }
+  }) as ContextRelationshipEdgeType[]
 }
 
 /**

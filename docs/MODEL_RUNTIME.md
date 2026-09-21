@@ -216,15 +216,80 @@ defaults it to `[]` for pre-Sprint-10 models, and `removeTable()` also
 drops a removed table's `DateTableDefinition` so no dangling metadata can
 survive. See [`docs/DATE_TABLES.md`](./DATE_TABLES.md).
 
+## Sprint 11 addendum
+
+`Relationship` (`src/domain/model.ts`) migrated from the hardcoded
+`{ one, many, cardinality: 'one-to-many', crossFilterDirection: 'single' }`
+shape above to a generic one:
+
+```ts
+type RelationshipCardinality = 'one-to-many' | 'one-to-one' | 'many-to-many'
+type CrossFilterDirection = 'left-to-right' | 'right-to-left' | 'both'
+
+interface Relationship {
+  id: string
+  left: ColumnRef
+  right: ColumnRef
+  cardinality: RelationshipCardinality
+  oneSide?: RelationshipSide       // required for one-to-many, absent otherwise
+  crossFilterDirection: CrossFilterDirection
+  active: boolean
+  createdAt: string
+}
+```
+
+No field named `one`/`many` exists on the canonical type any more — every
+consumer that needs "which side is the one/many side" goes through the
+centralized orientation helpers in `runtime/model/relationshipHelpers.ts`
+(`relationshipOneEndpoint`/`relationshipManyEndpoint`, only defined for
+`one-to-many`) rather than reading `.left`/`.right` and re-deriving it.
+
+**Legacy hydration.** A model persisted before Sprint 11 still has the old
+`{ one, many, cardinality: 'one-to-many', crossFilterDirection: 'single' }`
+shape on disk. `hydrateSemanticModel()` detects this via a local type guard
+(`isLegacyRelationship`, keyed on the absence of `left`/`right`) and converts
+it to `left = one, right = many, oneSide = 'left', crossFilterDirection =
+'left-to-right'` — exactly the old always-single one→many propagation
+direction, so a hydrated Retail model produces numerically identical results
+to before Sprint 11. Already-canonical relationships pass through unchanged.
+
+**`createRelationshipConfig`/`validateRelationshipConfig`/`updateRelationship`**
+(`modelRuntime.ts`) replace `createRelationship`/`validateRelationship` as
+the cardinality-aware create/validate/edit pipeline — branching on
+`candidate.cardinality` for uniqueness requirements, valid cross-filter
+directions, and foreign-key diagnostics instead of assuming `one-to-many`
+unconditionally. `createRelationship`/`validateRelationship` still exist,
+but only as thin convenience wrappers over the classic `{one, many, active?}`
+shorthand — they delegate entirely to the new functions and never introduce
+a second runtime representation.
+
+**`setRelationshipActive` fails closed.** It can no longer unconditionally
+flip a boolean — it now returns `{ model, diagnostics }`: clones the model
+with the proposed activation applied, checks whether the *effective*
+propagation graph becomes ambiguous, and — if so — rejects with
+`RELATIONSHIP_CREATES_AMBIGUOUS_PATH`, returning the original, unchanged
+model. Deactivating never needs this check (it only removes edges).
+
+See [`ADVANCED_RELATIONSHIPS.md`](./ADVANCED_RELATIONSHIPS.md) for the full
+cardinality rules, the generic edge-based propagation engine, the
+`AMBIGUOUS_FILTER_PATH` redesign that retires `ACTIVE_CYCLE`, and
+[`USERELATIONSHIP.md`](./USERELATIONSHIP.md) for the runtime relationship-
+override layer built on top of this.
+
 ## Known limitations
 
-- Only `one-to-many` cardinality and single-direction cross-filtering are
-  supported — no many-to-many, no bidirectional filters (explicitly out of
-  scope for this sprint).
 - Relationship creation is form-based (table/column selects); there is no
   drag-column-to-column gesture on the canvas.
-- Ambiguous-path detection stops at the second distinct path found between a
-  pair of tables — it reports the fact, not an exact path count.
-- No calculated columns, measures, DAX, or filter-context execution — the
-  `active` flag and stable references exist so Sprint 3+ has something to
-  build on, but nothing here evaluates a formula.
+- Ambiguous-path detection (`findAmbiguousDirectedPairs`) stops at the
+  second distinct directed path found between an ordered table pair — it
+  reports the fact, not an exact path count.
+- No calculated columns, measures, DAX, or filter-context execution
+  documented here — the `active` flag and stable references exist so
+  Sprint 3+ has something to build on, but nothing in this document
+  evaluates a formula.
+- No `TREATAS`, `NATURALINNERJOIN`/`NATURALLEFTOUTERJOIN`, RLS/security-filter
+  direction, composite models, or DirectQuery-specific relationship
+  behavior — see [`ADVANCED_RELATIONSHIPS.md`](./ADVANCED_RELATIONSHIPS.md)
+  "Known Power BI compatibility boundaries" for the current, Sprint
+  11-updated boundary list (the old "only one-to-many, single-direction"
+  limitation this section previously listed is resolved).

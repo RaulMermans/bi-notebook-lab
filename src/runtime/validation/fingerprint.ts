@@ -39,7 +39,7 @@ export function computeValidationFingerprint(model: SemanticModel, datasets: Rec
     .sort((a, b) => `${a.datasetId}:${a.tableId}`.localeCompare(`${b.datasetId}:${b.tableId}`))
 
   const relationships = [...model.relationships]
-    .map((r) => ({ one: r.one, many: r.many, active: r.active, cardinality: r.cardinality }))
+    .map((r) => ({ left: r.left, right: r.right, cardinality: r.cardinality, oneSide: r.oneSide, crossFilterDirection: r.crossFilterDirection, active: r.active }))
     .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
 
   const calculatedColumns = [...model.calculatedColumns]

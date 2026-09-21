@@ -185,13 +185,18 @@ export class NotebookRuntime {
     this.commitModel(modelRuntime.moveTable(model, modelTableId, position))
   }
 
-  createRelationship(
-    modelId: string,
-    input: { one: ColumnRef; many: ColumnRef; active?: boolean },
-  ): RelationshipDiagnostic[] {
+  createRelationship(modelId: string, input: modelRuntime.RelationshipConfigInput): RelationshipDiagnostic[] {
     const model = this.getModel(modelId)
     if (!model) return []
-    const result = modelRuntime.createRelationship(model, input, this.snapshot.datasets)
+    const result = modelRuntime.createRelationshipConfig(model, input, this.snapshot.datasets)
+    this.commitModel(result.model)
+    return result.diagnostics
+  }
+
+  updateRelationship(modelId: string, relationshipId: string, changes: modelRuntime.RelationshipConfigInput): RelationshipDiagnostic[] {
+    const model = this.getModel(modelId)
+    if (!model) return []
+    const result = modelRuntime.updateRelationship(model, relationshipId, changes, this.snapshot.datasets)
     this.commitModel(result.model)
     return result.diagnostics
   }
@@ -202,10 +207,12 @@ export class NotebookRuntime {
     this.commitModel(modelRuntime.removeRelationship(model, relationshipId))
   }
 
-  setRelationshipActive(modelId: string, relationshipId: string, active: boolean): void {
+  setRelationshipActive(modelId: string, relationshipId: string, active: boolean): RelationshipDiagnostic[] {
     const model = this.getModel(modelId)
-    if (!model) return
-    this.commitModel(modelRuntime.setRelationshipActive(model, relationshipId, active))
+    if (!model) return []
+    const result = modelRuntime.setRelationshipActive(model, relationshipId, active)
+    this.commitModel(result.model)
+    return result.diagnostics
   }
 
   /** Validates and, if valid, marks `modelTableId` as a Date Table (docs/DATE_TABLES.md) — never partially applies an invalid marking. */

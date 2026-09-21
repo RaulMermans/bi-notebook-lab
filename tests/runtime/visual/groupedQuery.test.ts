@@ -105,7 +105,7 @@ describe('evaluateGroupedRows', () => {
     const activeByLabel = Object.fromEntries(active.map((r) => [r.dimensionLabel, r.measureValues[measureId]]))
     expect(activeByLabel.Furniture).toBe(180) // orders 1,3,5
 
-    const inactiveModel = setRelationshipActive(model, productRelationshipId, false)
+    const { model: inactiveModel } = setRelationshipActive(model, productRelationshipId, false)
     const inactive = evaluateGroupedRows(inactiveModel, datasets, productCategory, [measureId], EMPTY_FILTER_CONTEXT, members)
     const inactiveByLabel = Object.fromEntries(inactive.map((r) => [r.dimensionLabel, r.measureValues[measureId]]))
     // With the Products relationship inactive, filtering by category no longer narrows Sales at all.

@@ -8,6 +8,7 @@ import { deleteDataset, loadDatasets, loadNotebook, saveDataset, saveNotebook } 
 import { deleteModel, loadModels, saveModel } from '../../persistence/modelStore'
 import type { CalculatedColumnInput } from '../calculatedColumn/calculatedColumnRuntime'
 import type { MeasureInput } from '../measure/measureRuntime'
+import type { RelationshipConfigInput } from '../model/modelRuntime'
 import { NotebookRuntime, emptyNotebook } from './notebookRuntime'
 
 export type HydrationStatus = 'loading' | 'ready'
@@ -100,8 +101,14 @@ export function useNotebookRuntime() {
         const model = runtime.getModel(modelId)
         if (model) await saveModel(model)
       },
-      async createRelationship(modelId: string, input: { one: ColumnRef; many: ColumnRef; active?: boolean }) {
+      async createRelationship(modelId: string, input: RelationshipConfigInput) {
         const diagnostics = runtime.createRelationship(modelId, input)
+        const model = runtime.getModel(modelId)
+        if (model) await saveModel(model)
+        return diagnostics
+      },
+      async updateRelationship(modelId: string, relationshipId: string, changes: RelationshipConfigInput) {
+        const diagnostics = runtime.updateRelationship(modelId, relationshipId, changes)
         const model = runtime.getModel(modelId)
         if (model) await saveModel(model)
         return diagnostics
@@ -111,10 +118,11 @@ export function useNotebookRuntime() {
         const model = runtime.getModel(modelId)
         if (model) await saveModel(model)
       },
-      async setRelationshipActive(modelId: string, relationshipId: string, active: boolean): Promise<void> {
-        runtime.setRelationshipActive(modelId, relationshipId, active)
+      async setRelationshipActive(modelId: string, relationshipId: string, active: boolean) {
+        const diagnostics = runtime.setRelationshipActive(modelId, relationshipId, active)
         const model = runtime.getModel(modelId)
         if (model) await saveModel(model)
+        return diagnostics
       },
       async markDateTable(modelId: string, modelTableId: string, dateColumn: ColumnRef) {
         const diagnostics = runtime.markDateTable(modelId, modelTableId, dateColumn)

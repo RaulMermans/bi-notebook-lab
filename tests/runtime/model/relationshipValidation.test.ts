@@ -124,10 +124,11 @@ describe('validateRelationship', () => {
       relationships: [
         {
           id: 'existing',
-          one: colRef('customers', 'CustomerID'),
-          many: colRef('sales', 'CustomerID'),
+          left: colRef('customers', 'CustomerID'),
+          right: colRef('sales', 'CustomerID'),
           cardinality: 'one-to-many',
-          crossFilterDirection: 'single',
+          oneSide: 'left',
+          crossFilterDirection: 'left-to-right',
           active: true,
           createdAt: new Date().toISOString(),
         },

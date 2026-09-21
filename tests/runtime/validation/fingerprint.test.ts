@@ -41,7 +41,7 @@ describe('validation staleness', () => {
     const cell = testCellFor(solved.id)
     const run = runValidation({ datasets, models: { [solved.id]: solved } }, cell)
 
-    const toggled = setRelationshipActive(solved, productRelationshipId, false)
+    const { model: toggled } = setRelationshipActive(solved, productRelationshipId, false)
     expect(isValidationRunStale(run, toggled, datasets, cell.validation)).toBe(true)
   })
 

@@ -56,7 +56,7 @@ export function ContextTableNode({ id, data }: NodeProps<ContextTableNodeType>) 
         ) : null}
         {(data.filterState === 'propagated' || data.filterState === 'direct+propagated') && data.incomingPropagation.length > 0 ? (
           <div className="context-node__reason">
-            Via {data.incomingPropagation.map((p) => `${p.oneTableName} → ${p.manyKeyColumnName}`).join(', ')}
+            Via {data.incomingPropagation.map((p) => `${p.sourceTableName} → ${p.targetColumnName}`).join(', ')}
           </div>
         ) : null}
       </button>

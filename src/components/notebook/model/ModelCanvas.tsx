@@ -14,7 +14,7 @@ import '@xyflow/react/dist/style.css'
 import type { Dataset } from '../../../domain/data'
 import type { SemanticModel } from '../../../domain/model'
 import { defaultTablePosition } from '../../../lib/layout/modelLayout'
-import { resolveTableRef } from '../../../runtime/model/modelRuntime'
+import { resolveColumnRef, resolveTableRef } from '../../../runtime/model/modelRuntime'
 import { ModelTableNode, type ModelTableNodeType } from './ModelTableNode'
 import { RelationshipEdge, type RelationshipEdgeType } from './RelationshipEdge'
 
@@ -30,11 +30,11 @@ interface ModelCanvasProps {
 function keyColumnIdsFor(model: SemanticModel, modelTable: SemanticModel['tables'][number]): Set<string> {
   const ids = new Set<string>()
   for (const relationship of model.relationships) {
-    if (relationship.one.datasetId === modelTable.datasetId && relationship.one.tableId === modelTable.tableId) {
-      ids.add(relationship.one.columnId)
+    if (relationship.left.datasetId === modelTable.datasetId && relationship.left.tableId === modelTable.tableId) {
+      ids.add(relationship.left.columnId)
     }
-    if (relationship.many.datasetId === modelTable.datasetId && relationship.many.tableId === modelTable.tableId) {
-      ids.add(relationship.many.columnId)
+    if (relationship.right.datasetId === modelTable.datasetId && relationship.right.tableId === modelTable.tableId) {
+      ids.add(relationship.right.columnId)
     }
   }
   return ids
@@ -62,22 +62,41 @@ function deriveNodes(model: SemanticModel, datasets: Record<string, Dataset>): M
   })
 }
 
-function deriveEdges(model: SemanticModel): RelationshipEdgeType[] {
+/** Offsets parallel edges between the same table pair (sprint brief §48) so two relationships connecting the same two tables — e.g. OrderDate + ShipDate — never draw directly on top of each other. */
+function pairKey(a: string, b: string): string {
+  return [a, b].sort().join(':')
+}
+
+function deriveEdges(model: SemanticModel, datasets: Record<string, Dataset>): RelationshipEdgeType[] {
+  const seenPerPair = new Map<string, number>()
+
   return model.relationships.flatMap((relationship) => {
-    const manyTable = model.tables.find(
-      (t) => t.datasetId === relationship.many.datasetId && t.tableId === relationship.many.tableId,
-    )
-    const oneTable = model.tables.find(
-      (t) => t.datasetId === relationship.one.datasetId && t.tableId === relationship.one.tableId,
-    )
-    if (!manyTable || !oneTable) return []
+    const leftTable = model.tables.find((t) => t.datasetId === relationship.left.datasetId && t.tableId === relationship.left.tableId)
+    const rightTable = model.tables.find((t) => t.datasetId === relationship.right.datasetId && t.tableId === relationship.right.tableId)
+    if (!leftTable || !rightTable) return []
+
+    const key = pairKey(leftTable.id, rightTable.id)
+    const index = seenPerPair.get(key) ?? 0
+    seenPerPair.set(key, index + 1)
+
+    const leftColumn = resolveColumnRef(datasets, relationship.left)
+    const rightColumn = resolveColumnRef(datasets, relationship.right)
+
     return [
       {
         id: relationship.id,
-        source: manyTable.id,
-        target: oneTable.id,
+        source: leftTable.id,
+        target: rightTable.id,
         type: 'relationship' as const,
-        data: { active: relationship.active },
+        data: {
+          active: relationship.active,
+          cardinality: relationship.cardinality,
+          oneSide: relationship.oneSide,
+          crossFilterDirection: relationship.crossFilterDirection,
+          leftColumnName: leftColumn?.column.name ?? '?',
+          rightColumnName: rightColumn?.column.name ?? '?',
+          parallelIndex: index,
+        },
       },
     ]
   })
@@ -101,7 +120,7 @@ export function ModelCanvas({ model, datasets, onMoveTable }: ModelCanvasProps) 
     setNodes((current) => applyNodeChanges(changes, current))
   }, [])
 
-  const edges: Edge[] = deriveEdges(model)
+  const edges: Edge[] = deriveEdges(model, datasets)
 
   return (
     <div className="model-canvas">

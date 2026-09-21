@@ -193,6 +193,8 @@ const RELATED_MESSAGES: Record<RelatedFailureCode, (current: string, target: str
     `"${target}" is on the "many" side relative to "${current}" — RELATED can only look up from the many side to the one side.`,
   RELATED_AMBIGUOUS_RELATIONSHIP: (current, target) =>
     `More than one active relationship connects "${current}" to "${target}", so RELATED doesn't know which one to use.`,
+  RELATED_UNSUPPORTED_CARDINALITY: (current, target) =>
+    `"${current}" and "${target}" are connected by a many-to-many relationship — RELATED can't pick a single related row, since neither side is unique.`,
 }
 
 /**

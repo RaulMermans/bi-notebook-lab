@@ -44,12 +44,15 @@ The first product milestone is not a dashboard builder. It is a **learning runti
 Sprint 1 (Data Runtime), Sprint 2 (Semantic Model Runtime), Sprint 3
 (Calculated Columns & Row Context), Sprint 4 (Measures & Filter Context),
 Sprint 5 (Validation Engine), Sprint 6 (Context Visualizer), Sprint 7
-(Visual Cells), Sprint 8 (`CALCULATE` & Filter Context Modification) and
-Sprint 9 (Iterators, Table Expressions & Conditional Logic) are complete —
-the full MVP learning loop (import → model → calculated columns → measures →
-filter context manipulation → visualize → validate) now works end to end,
-with real row-iterating DAX (`SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX`) and
-conditional logic (`IF`/`SWITCH`) on top. This repository now contains:
+(Visual Cells), Sprint 8 (`CALCULATE` & Filter Context Modification),
+Sprint 9 (Iterators, Table Expressions & Conditional Logic), Sprint 10
+(Date Tables & Classic Time Intelligence) and Sprint 11 (Advanced
+Relationships & `USERELATIONSHIP`/`CROSSFILTER`) are complete — the full MVP
+learning loop (import → model → calculated columns → measures → filter
+context manipulation → visualize → validate) now works end to end, with real
+row-iterating DAX (`SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX`), conditional
+logic (`IF`/`SWITCH`), classic time intelligence, and a fully generic
+relationship model on top. This repository now contains:
 
 - product and architecture contracts
 - notebook/cell domain types as a discriminated union, including functional
@@ -57,10 +60,13 @@ conditional logic (`IF`/`SWITCH`) on top. This repository now contains:
 - a working data import pipeline: CSV, Excel (multi-sheet), and a built-in
   sample retail dataset
 - deterministic type inference and column profiling
-- a semantic model runtime: 1:* relationships with real validation (type
-  compatibility, one-side uniqueness, duplicate/self-relationship checks,
-  unmatched-foreign-key warnings), cycle/ambiguous-path graph diagnostics,
-  and topology-based fact/dimension inference
+- a semantic model runtime: generic relationships (1:1, 1:*, *:*,
+  single-direction or bidirectional cross-filter, active/inactive, multiple
+  relationships between the same table pair for role-playing dimensions)
+  with real cardinality-aware validation (type compatibility, uniqueness,
+  duplicate/self-relationship checks, unmatched-foreign-key warnings),
+  directed ambiguous-filter-path diagnostics, and topology-based
+  fact/dimension inference
 - a visual model canvas (React Flow) that renders and repositions the model
   — the model itself, not the canvas, is the source of truth
 - a reusable expression engine (parser → AST → binder → evaluator →
@@ -137,13 +143,27 @@ conditional logic (`IF`/`SWITCH`) on top. This repository now contains:
   SAMEPERIODLASTYEAR(Calendar[Date]))` under a `Year = 2025, Month = March`
   slicer yields March 2024 — not blank.
 
-Bidirectional/many-to-many relationships and calendar-based (Auto date/time)
-time intelligence are **not** implemented yet — see
+- **Advanced Relationships & `USERELATIONSHIP`/`CROSSFILTER`** — the
+  relationship model is now fully generic: 1:1, 1:*, *:*, single-direction
+  or bidirectional cross-filter, multiple relationships between the same
+  table pair (role-playing dimensions, e.g. Order Date/Ship Date, one
+  active), and directed `AMBIGUOUS_FILTER_PATH` detection that never flags a
+  legal bidirectional relationship. `USERELATIONSHIP`/`CROSSFILTER` in
+  `CALCULATE` temporarily activate/suppress/redirect a relationship for one
+  calculation only, composing for free with `SAMEPERIODLASTYEAR`/`DATEADD`
+  and every Visual Cell. `RELATED` now also supports one-to-one lookups and
+  rejects many-to-many. See
+  [`docs/ADVANCED_RELATIONSHIPS.md`](./docs/ADVANCED_RELATIONSHIPS.md) and
+  [`docs/USERELATIONSHIP.md`](./docs/USERELATIONSHIP.md).
+
+Calendar-based (Auto date/time) time intelligence, `TREATAS`, composite
+models, and full DAX compatibility remain **not** implemented — see
 [`docs/ITERATORS.md`](./docs/ITERATORS.md),
 [`docs/TABLE_EXPRESSIONS.md`](./docs/TABLE_EXPRESSIONS.md),
-[`docs/CALCULATE.md`](./docs/CALCULATE.md) and
-[`docs/TIME_INTELLIGENCE.md`](./docs/TIME_INTELLIGENCE.md) for the exact
-scope and known limitations.
+[`docs/CALCULATE.md`](./docs/CALCULATE.md),
+[`docs/TIME_INTELLIGENCE.md`](./docs/TIME_INTELLIGENCE.md) and
+[`docs/ADVANCED_RELATIONSHIPS.md`](./docs/ADVANCED_RELATIONSHIPS.md) for the
+exact scope and known limitations.
 
 ## Run locally
 
@@ -231,6 +251,8 @@ match.
 - [`docs/ITERATORS.md`](./docs/ITERATORS.md)
 - [`docs/DATE_TABLES.md`](./docs/DATE_TABLES.md)
 - [`docs/TIME_INTELLIGENCE.md`](./docs/TIME_INTELLIGENCE.md)
+- [`docs/ADVANCED_RELATIONSHIPS.md`](./docs/ADVANCED_RELATIONSHIPS.md)
+- [`docs/USERELATIONSHIP.md`](./docs/USERELATIONSHIP.md)
 
 ## Scope guardrail
 

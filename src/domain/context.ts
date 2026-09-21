@@ -1,5 +1,6 @@
 import type { DataType } from './data'
 import type { ExecutionTraceNode } from '../expression/trace'
+import type { CrossFilterDirection, RelationshipCardinality, RelationshipSide } from './model'
 import type { ColumnFilter } from '../runtime/measure/filterContext'
 
 /**
@@ -22,14 +23,18 @@ export interface ContextFilterSummary {
 
 export type ContextTableFilterState = 'unfiltered' | 'direct' | 'propagated' | 'direct+propagated'
 
+export type RelationshipPropagationDirection = 'left-to-right' | 'right-to-left'
+
+/** One directed propagation hop that actually reached this table this resolution — generic replacement for the old one/many-specific shape (sprint brief §49, §53). */
 export interface ContextTablePropagationSource {
   relationshipId: string
-  oneModelTableId: string
-  oneTableName: string
-  oneKeyColumnName: string
-  manyKeyColumnName: string
-  manyRowsBefore: number
-  manyRowsAfter: number
+  sourceModelTableId: string
+  sourceTableName: string
+  sourceColumnName: string
+  targetColumnName: string
+  direction: RelationshipPropagationDirection
+  targetRowsBefore: number
+  targetRowsAfter: number
 }
 
 export interface ContextTableState {
@@ -46,22 +51,45 @@ export interface ContextTableState {
 
 export type RelationshipPropagationState = 'propagated' | 'active-no-effect' | 'inactive'
 
+/** Why this resolution's effective active/direction state differs from the persisted model — surfaced from runtime truth (`ResolvedFilterState.relationshipOverrides`), never inferred from source text (sprint brief §50-51). */
+export type RelationshipOverrideReason =
+  | 'activated-by-userelationship'
+  | 'suppressed-by-userelationship'
+  | 'crossfilter-direction-override'
+  | 'crossfilter-none'
+
+export interface ContextRelationshipPropagationEntry {
+  direction: RelationshipPropagationDirection
+  targetModelTableId: string
+  targetRowsBefore: number
+  targetRowsAfter: number
+}
+
+/**
+ * Sprint 11 generalization: `left`/`right` replace the hardcoded `one`/`many`
+ * naming (a relationship no longer necessarily has a "1" side at all), and
+ * `propagation` is a list (0-2 entries) rather than a single before/after
+ * pair, since a bidirectional/1:1 relationship can propagate in both
+ * directions in the same resolution.
+ */
 export interface ContextRelationshipState {
   relationshipId: string
-  oneModelTableId: string
-  manyModelTableId: string
-  oneTableName: string
-  manyTableName: string
-  oneColumnName: string
-  manyColumnName: string
+  leftModelTableId: string
+  rightModelTableId: string
+  leftTableName: string
+  rightTableName: string
+  leftColumnName: string
+  rightColumnName: string
+  cardinality: RelationshipCardinality
+  oneSide?: RelationshipSide
+  crossFilterDirection: CrossFilterDirection
+  /** The persisted model's own active flag — never the override. */
   active: boolean
-  /** Whether this relationship actually narrowed the many side under the current context. */
-  propagated: boolean
+  /** Whether this relationship actually participates in propagation edges for this resolution, folding in any USERELATIONSHIP/CROSSFILTER override. */
+  effectiveActive: boolean
+  overrideReason?: RelationshipOverrideReason
+  propagation: ContextRelationshipPropagationEntry[]
   state: RelationshipPropagationState
-  manyRowsBefore?: number
-  manyRowsAfter?: number
-  /** The number of distinct "1"-side keys still visible — equal to the one-side's visible row count, since a relationship's "1" side is always unique (enforced at creation). */
-  allowedOneSideKeys?: number
 }
 
 export interface MeasureContextComparison {

@@ -255,7 +255,7 @@ describe('filter context and relationship propagation', () => {
 
   it('ignores an inactive relationship when propagating a filter', () => {
     const { model, datasets, salesTableId, customersTableId, productRelationshipId } = buildFixture()
-    const disabled = setRelationshipActive(model, productRelationshipId, false)
+    const { model: disabled } = setRelationshipActive(model, productRelationshipId, false)
     const withM = withMeasures(disabled, datasets, salesTableId, customersTableId)
     const categoryColumn = datasets['products-ds'].tables[0].columns.find((c) => c.name === 'Category')!
 
@@ -269,8 +269,8 @@ describe('filter context and relationship propagation', () => {
 
   it('recovers propagation once the relationship is re-enabled', () => {
     const { model, datasets, salesTableId, customersTableId, productRelationshipId } = buildFixture()
-    const disabled = setRelationshipActive(model, productRelationshipId, false)
-    const reEnabled = setRelationshipActive(disabled, productRelationshipId, true)
+    const { model: disabled } = setRelationshipActive(model, productRelationshipId, false)
+    const { model: reEnabled } = setRelationshipActive(disabled, productRelationshipId, true)
     const withM = withMeasures(reEnabled, datasets, salesTableId, customersTableId)
     const categoryColumn = datasets['products-ds'].tables[0].columns.find((c) => c.name === 'Category')!
 
@@ -301,21 +301,21 @@ describe('filter context and relationship propagation', () => {
     expect(unfiltered.value).toBe(460)
   })
 
-  it('fails closed with FILTER_GRAPH_INVALID when the active relationship graph has a cycle', () => {
+  it('a directed cycle among active relationships is legal and does not fail closed (ACTIVE_CYCLE is retired, sprint brief §15)', () => {
     const { model, datasets } = buildFixture()
-    // Force a cycle Sales -> Customers -> Region -> Sales by adding a direct Sales <- Region edge. Spliced
-    // directly into `relationships` (bypassing `createRelationship`'s structural checks) so the test targets
-    // `FILTER_GRAPH_INVALID` in isolation — cycle detection is purely topological and ignores column validity.
+    // Sales(1) -> Region(*) closes a directed cycle Customers -> Sales -> Region -> Customers with the
+    // existing edges, but every ordered pair still has exactly one propagation path — not ambiguous.
     const forcedCycle: SemanticModel = {
       ...model,
       relationships: [
         ...model.relationships,
         {
           id: 'forced-cycle',
-          one: { datasetId: 'sales-ds', tableId: 'sales-table', columnId: 'sales-orderid' },
-          many: { datasetId: 'region-ds', tableId: 'region-table', columnId: 'region-id' },
+          left: { datasetId: 'sales-ds', tableId: 'sales-table', columnId: 'sales-orderid' },
+          right: { datasetId: 'region-ds', tableId: 'region-table', columnId: 'region-id' },
           cardinality: 'one-to-many',
-          crossFilterDirection: 'single',
+          oneSide: 'left',
+          crossFilterDirection: 'left-to-right',
           active: true,
           createdAt: new Date().toISOString(),
         },
@@ -323,7 +323,7 @@ describe('filter context and relationship propagation', () => {
     }
 
     const execution = evaluateMeasure(forcedCycle, datasets, 'any-measure-id')
-    expect(execution.diagnostics).toEqual([expect.objectContaining({ code: 'FILTER_GRAPH_INVALID' })])
+    expect(execution.diagnostics.some((d) => d.code === 'FILTER_GRAPH_INVALID')).toBe(false)
   })
 
   it('fails closed with FILTER_GRAPH_INVALID when the active relationship graph is ambiguous', () => {
@@ -335,10 +335,11 @@ describe('filter context and relationship propagation', () => {
         ...model.relationships,
         {
           id: 'region-to-sales-direct',
-          one: { datasetId: 'region-ds', tableId: 'region-table', columnId: 'region-id' },
-          many: { datasetId: 'sales-ds', tableId: 'sales-table', columnId: 'sales-orderid' },
+          left: { datasetId: 'region-ds', tableId: 'region-table', columnId: 'region-id' },
+          right: { datasetId: 'sales-ds', tableId: 'sales-table', columnId: 'sales-orderid' },
           cardinality: 'one-to-many',
-          crossFilterDirection: 'single',
+          oneSide: 'left',
+          crossFilterDirection: 'left-to-right',
           active: true,
           createdAt: new Date().toISOString(),
         },
