@@ -5,7 +5,7 @@ An interactive notebook for learning **business intelligence, data modeling and 
 The product is intentionally **not a Power BI clone**. The core mental model is closer to Jupyter:
 
 ```text
-Dataset → Model → Calculated Column → Measure → Visual → Question → Test
+Dataset → Power Query → Model → Calculated Column → Measure → Visual → Question → Test
 ```
 
 Each concept is represented as an executable notebook cell. Learners build a solution progressively and receive immediate feedback on structure, calculations and reasoning.
@@ -30,6 +30,7 @@ A notebook can contain:
 
 - `MarkdownCell`
 - `DataCell`
+- `QueryCell`
 - `ModelCell`
 - `CalculatedColumnCell`
 - `MeasureCell`
@@ -46,8 +47,9 @@ Sprint 1 (Data Runtime), Sprint 2 (Semantic Model Runtime), Sprint 3
 Sprint 5 (Validation Engine), Sprint 6 (Context Visualizer), Sprint 7
 (Visual Cells), Sprint 8 (`CALCULATE` & Filter Context Modification),
 Sprint 9 (Iterators, Table Expressions & Conditional Logic), Sprint 10
-(Date Tables & Classic Time Intelligence) and Sprint 11 (Advanced
-Relationships & `USERELATIONSHIP`/`CROSSFILTER`) are complete — the full MVP
+(Date Tables & Classic Time Intelligence), Sprint 11 (Advanced
+Relationships & `USERELATIONSHIP`/`CROSSFILTER`) and Sprint 12 (Power
+Query & Data Transformation Runtime) are complete — the full MVP
 learning loop (import → model → calculated columns → measures → filter
 context manipulation → visualize → validate) now works end to end, with real
 row-iterating DAX (`SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX`), conditional
@@ -156,13 +158,34 @@ relationship model on top. This repository now contains:
   [`docs/ADVANCED_RELATIONSHIPS.md`](./docs/ADVANCED_RELATIONSHIPS.md) and
   [`docs/USERELATIONSHIP.md`](./docs/USERELATIONSHIP.md).
 
+- **Power Query & Data Transformation Runtime** — a real pre-model
+  transformation layer. `QueryCell`/`QueryDefinition` run a typed Applied
+  Steps pipeline (Rename/Remove/Reorder Columns, Change Type, Filter Rows,
+  Replace Values, Remove Duplicates, Sort Rows, Fill Down/Up, Split/Merge
+  Columns, Group By, Merge Queries with all six join kinds, Append Queries)
+  against an immutable raw import or another query's output, with a query
+  dependency graph that fails closed on cycles, stable output/column
+  identity across every re-evaluation, and per-step diagnostics that never
+  crash the notebook. The transformed output enters the same `Dataset`
+  boundary every `DataCell` always has — the Semantic Model, Calculated
+  Columns, Measures, `CALCULATE`, iterators, time intelligence,
+  relationships and Visual Runtime all stay completely unaware Power Query
+  exists. Editing a query's filter step recomputes downstream measures and
+  visuals automatically and turns a passing `TestCell` STALE, with no model
+  rebuild. See [`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md)
+  and [`docs/APPLIED_STEPS.md`](./docs/APPLIED_STEPS.md).
+
 Calendar-based (Auto date/time) time intelligence, `TREATAS`, composite
-models, and full DAX compatibility remain **not** implemented — see
+models, full DAX compatibility, and an arbitrary Power Query M
+parser/interpreter (Sprint 12 implements typed Applied Steps, not M — see
+`docs/POWER_QUERY_RUNTIME.md` "M-language boundary") remain **not**
+implemented — see
 [`docs/ITERATORS.md`](./docs/ITERATORS.md),
 [`docs/TABLE_EXPRESSIONS.md`](./docs/TABLE_EXPRESSIONS.md),
 [`docs/CALCULATE.md`](./docs/CALCULATE.md),
-[`docs/TIME_INTELLIGENCE.md`](./docs/TIME_INTELLIGENCE.md) and
-[`docs/ADVANCED_RELATIONSHIPS.md`](./docs/ADVANCED_RELATIONSHIPS.md) for the
+[`docs/TIME_INTELLIGENCE.md`](./docs/TIME_INTELLIGENCE.md),
+[`docs/ADVANCED_RELATIONSHIPS.md`](./docs/ADVANCED_RELATIONSHIPS.md) and
+[`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md) for the
 exact scope and known limitations.
 
 ## Run locally
@@ -173,7 +196,23 @@ npm run dev
 ```
 
 Then either import a `.csv`/`.xlsx` file or click **Load Retail Dataset** to
-try the built-in sample. Add a Model cell to select tables into a semantic
+try the built-in sample.
+
+Click **Load Power Query Lab Dataset** to try Power Query on deliberately
+messy data (`Sales_Jan`/`Sales_Feb`/`Products`/`Customers_Dirty`). On
+`Customers_Dirty`, click **Transform Data**, then use the toolbar to Rename
+`customer_id` → `CustomerID`, Change Type to `integer`, Replace `"ES "` →
+`"ES"` in `Country`, Filter `CustomerID` is-not-blank, and Remove
+Duplicates by `CustomerID` — click any Applied Step to see the table as it
+existed at that point. Use **+ Reference Query** on `Sales_Jan`/`Sales_Feb`
+to build `Sales Combined` with an Append Queries step, then Merge Queries
+against a `Products` query to expand `ProductName`/`Category`/`UnitPrice`,
+and Group By `Category` to total `Revenue`. Add the transformed queries'
+outputs (not the raw `DataCell`s) to a Model cell — everything downstream
+(relationships, measures, visuals, validation) works exactly as it does on
+raw data, because it's reading the same kind of `Dataset` either way.
+
+Add a Model cell to select tables into a semantic
 model and build a star schema (Customers/Products/Calendar 1:* Sales), then
 use **+ New calculated column** to write a row-level expression such as
 `Sales[Revenue] - Sales[Cost]` or `RELATED(Products[Category])`.
@@ -253,9 +292,16 @@ match.
 - [`docs/TIME_INTELLIGENCE.md`](./docs/TIME_INTELLIGENCE.md)
 - [`docs/ADVANCED_RELATIONSHIPS.md`](./docs/ADVANCED_RELATIONSHIPS.md)
 - [`docs/USERELATIONSHIP.md`](./docs/USERELATIONSHIP.md)
+- [`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md)
+- [`docs/APPLIED_STEPS.md`](./docs/APPLIED_STEPS.md)
 
 ## Scope guardrail
 
-Do **not** attempt to recreate Power BI Desktop, Power Query, Microsoft Fabric or full DAX compatibility.
+Do **not** attempt to recreate Power BI Desktop, Microsoft Fabric, or full
+DAX compatibility. Power Query is now in scope, but only its Applied Steps
+transformation workflow (Sprint 12) — not an arbitrary M parser/interpreter,
+query folding, the Advanced Editor, custom M functions, connectors,
+parameters, or dataflows. See `docs/POWER_QUERY_RUNTIME.md` "M-language
+boundary".
 
 The learning target is the smallest runtime that can faithfully teach the mental models used in real BI work.

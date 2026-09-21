@@ -12,9 +12,10 @@ interface DataCellCardProps {
   cell: NotebookCell
   dataset: Dataset | undefined
   onRemove: () => void
+  onTransformData: (tableId: string) => void
 }
 
-export function DataCellCard({ cell, dataset, onRemove }: DataCellCardProps) {
+export function DataCellCard({ cell, dataset, onRemove, onTransformData }: DataCellCardProps) {
   const [activeTab, setActiveTab] = useState<Tab | null>(null)
 
   if (!dataset) {
@@ -45,9 +46,14 @@ export function DataCellCard({ cell, dataset, onRemove }: DataCellCardProps) {
               {table.rowCount.toLocaleString()} rows · {table.columns.length} columns
             </p>
           </div>
-          <button type="button" className="text-button" onClick={onRemove}>
-            Remove
-          </button>
+          <div className="cell__header-actions">
+            <button type="button" className="secondary-button" onClick={() => onTransformData(table.id)}>
+              Transform Data
+            </button>
+            <button type="button" className="text-button" onClick={onRemove}>
+              Remove
+            </button>
+          </div>
         </div>
 
         <ul className="column-summary">

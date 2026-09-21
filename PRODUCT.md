@@ -76,3 +76,15 @@ V1 is complete when a learner can:
 - full DAX grammar
 - enterprise connectors
 - pixel-perfect dashboard authoring
+
+> This list froze the *original* V1 milestone. The product has since grown
+> well past it (CALCULATE, iterators, time intelligence, advanced
+> relationships, and — as of Sprint 12 — Power Query's Applied Steps
+> workflow are all implemented; see ROADMAP.md for what has actually
+> shipped). "Power Query / M" above meant no pre-model transformation layer
+> at all; Sprint 12 added one, but strictly through typed Applied Steps —
+> **not** an arbitrary M parser/interpreter, query folding, or the Advanced
+> Editor. See [`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md)
+> "M-language boundary". DirectQuery, Power BI Service, gateways, Fabric,
+> RLS, enterprise connectors, and full DAX grammar remain genuinely out of
+> scope.

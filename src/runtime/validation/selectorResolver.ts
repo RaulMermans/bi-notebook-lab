@@ -54,6 +54,7 @@ function sourceKeyOf(dataset: Dataset): string | undefined {
   if (source.type === 'sample') return source.key
   if (source.type === 'xlsx') return source.sheetName
   if (source.type === 'csv') return source.fileName
+  if (source.type === 'query') return source.queryId
   return undefined
 }
 

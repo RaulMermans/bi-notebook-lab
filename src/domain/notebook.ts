@@ -22,6 +22,20 @@ export interface ModelCell extends BaseNotebookCell {
 }
 
 /**
+ * A Power Query transformation cell — Sprint 12's counterpart to `DataCell`.
+ * Like `ModelCell`, it stores a reference only: the actual `QueryDefinition`
+ * (source, Applied Steps, load state) lives in the notebook runtime's query
+ * store, mirroring how a `ModelCell` references a `SemanticModel`
+ * (docs/POWER_QUERY_RUNTIME.md "QueryCell"). A `DataCell` stays the raw
+ * source; a `QueryCell` is always a transformation of one (docs/CELL_SPEC.md
+ * "DataCell vs QueryCell").
+ */
+export interface QueryCell extends BaseNotebookCell {
+  kind: 'query'
+  queryId: string
+}
+
+/**
  * A calculated column cell stores references only — the actual
  * `CalculatedColumn` definition (expression, target table, data type) lives
  * in the `SemanticModel` named by `modelId`. Both ids are always required:
@@ -96,6 +110,7 @@ export interface GenericNotebookCell extends BaseNotebookCell {
 export type NotebookCell =
   | DataCell
   | ModelCell
+  | QueryCell
   | CalculatedColumnCell
   | MeasureCell
   | TestCell

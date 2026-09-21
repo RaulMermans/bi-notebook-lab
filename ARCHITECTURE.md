@@ -28,10 +28,23 @@
            │
            ▼
 ┌────────────────────────────────────────────────────────────┐
+│                   Power Query Runtime (Sprint 12)           │
+│   QueryDefinition · Applied Steps · dependency graph        │
+│   → produces an ordinary Dataset; the Semantic Core above   │
+│     never imports from this layer                          │
+└──────────────────────────────┬───────────────────────────────┘
+                               ▼
+┌────────────────────────────────────────────────────────────┐
 │                      Local Data Layer                      │
 │            CSV / XLSX / bundled exercise datasets         │
 └────────────────────────────────────────────────────────────┘
 ```
+
+The Power Query layer sits between the Local Data Layer and the BI
+Semantic Core, but the arrow direction matters: it *reads* raw imported
+`Dataset`s and *produces* another `Dataset`, which the Semantic Core then
+consumes exactly like a raw import — there is no dependency edge running
+the other way. See [`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md).
 
 ## Architectural rule
 
@@ -749,6 +762,88 @@ No visual-specific or relationship-specific changes were needed in `runtime/visu
 [`docs/ADVANCED_RELATIONSHIPS.md`](./docs/ADVANCED_RELATIONSHIPS.md) and
 [`docs/USERELATIONSHIP.md`](./docs/USERELATIONSHIP.md) for the full design,
 migration/hydration details, and known Power BI compatibility boundaries.
+
+## Sprint 12 implementation (Power Query & Data Transformation Runtime)
+
+New files, none of which any existing BI-engine file imports from:
+
+```text
+domain/query.ts                    QueryDefinition, QuerySource, the 14-member QueryStep
+                                      union, QueryEvaluation/QueryStepResult/QueryDiagnostic
+
+runtime/query/queryRuntime.ts      top-level API: evaluateAllQueries, frameAtStep,
+                                      createQueryDefinition, add/update/remove/moveQueryStep,
+                                      rename(Query|QueryStep), setQueryLoadEnabled,
+                                      findDependentQueryIds
+runtime/query/queryEvaluator.ts    runs one query's Applied Steps in order, stops at the
+                                      first failure, enforces DATA_LIMITS per step
+runtime/query/queryGraph.ts        dependency DAG, dependency-first order, fail-closed
+                                      cycle/missing-dependency detection
+runtime/query/queryFingerprint.ts  semantic fingerprint (source + step configs, minus
+                                      id/name, + dependency fingerprints)
+runtime/query/queryFrame.ts        the in-flight { columns, rows } shape steps operate on
+runtime/query/queryDiagnostics.ts  QueryDiagnostic factory
+runtime/query/stepContext.ts       what a step needs beyond its own frame (resolving
+                                      another QuerySource; row/column limits)
+runtime/query/queryStepFactory.ts  builds a fully-formed QueryStep, generating any new
+                                      column ids exactly once, never during evaluation
+runtime/query/steps/*.ts           one pure evaluator per step kind (14 files)
+
+persistence/queryStore.ts          mirrors modelStore.ts — persists QueryDefinition only
+
+lib/sample/generatePowerQueryLabDataset.ts   the seeded messy-data lab fixture
+
+components/notebook/query/QueryCellCard.tsx  Applied Steps list + preview + toolbar
+components/notebook/query/queryStepForms.tsx one form per step kind
+
+docs/POWER_QUERY_RUNTIME.md, docs/APPLIED_STEPS.md
+```
+
+Modified files, and exactly what changed:
+
+```text
+domain/data.ts                    + DatasetSource variant { type: 'query'; queryId; revision }
+domain/notebook.ts                + QueryCell (kind: 'query'), added to the NotebookCell union
+lib/hash.ts                       extracted from runtime/validation/fingerprint.ts so
+                                     queryFingerprint.ts can reuse the same FNV-1a hash
+                                     without duplicating it
+runtime/validation/fingerprint.ts   tables payload now includes
+                                       resolved.dataset.source.revision when the table's
+                                       dataset is query-sourced — the one line that makes a
+                                       row-only Power Query edit turn a PASS into STALE
+runtime/validation/selectorResolver.ts   sourceKeyOf() now also handles source.type ===
+                                            'query' (returns queryId), so a TableSelector can
+                                            disambiguate a query-sourced table like it already
+                                            could for sample/xlsx/csv sources
+runtime/notebook/notebookRuntime.ts   + queries/queryEvaluations on NotebookRuntimeSnapshot;
+                                         + createQueryFromDataset/createQueryFromQuery/
+                                         renameQuery/add·update·rename·remove·moveQueryStep/
+                                         setQueryLoadEnabled/deleteQuery/refreshQueries;
+                                         a private reEvaluateQueries() re-runs
+                                         evaluateAllQueries and folds load-enabled outputs
+                                         back into the same `datasets` map DataCell has
+                                         always used — no other runtime file changed
+runtime/notebook/useNotebookRuntime.ts   hydrates QueryDefinitions alongside datasets/models,
+                                            calls refreshQueries() once after replaceAll,
+                                            exposes the new query actions
+runtime/data/dataRuntime.ts        + loadSamplePowerQueryLabDataset
+components/notebook/NotebookCell.tsx   + 'query' cell dispatch; DataCellCard gained a
+                                          "Transform Data" action
+components/notebook/DataCellCard.tsx   + onTransformData prop/button — the raw DataCell is
+                                          never mutated or removed by it
+App.tsx                            wires the new query state/actions through; + "Reference
+                                      Query" action
+styles/app.css                     + .query-* rules for the Query cell
+```
+
+`SemanticModel`, `CalculatedColumn`, `Measure`, every `expression/*` file,
+every `runtime/measure/*`/`runtime/dateTable/*`/`runtime/context/*` file,
+and every `runtime/visual/*`/`components/visual/*` file are **untouched** —
+proof that a query's output really does enter the model exactly like any
+other `Dataset` (`docs/POWER_QUERY_RUNTIME.md` "Model integration
+boundary"). See [`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md)
+and [`docs/APPLIED_STEPS.md`](./docs/APPLIED_STEPS.md) for the full design,
+stable-identity strategy, and known Power Query compatibility boundaries.
 
 ## Expression strategy
 

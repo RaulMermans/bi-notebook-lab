@@ -15,7 +15,7 @@ import { useNotebookVisualContext } from './runtime/notebook/useNotebookVisualCo
 import './styles/app.css'
 
 export default function App() {
-  const { notebook, datasets, models, status, actions } = useNotebookRuntime()
+  const { notebook, datasets, models, queries, queryEvaluations, status, actions } = useNotebookRuntime()
   const hasCells = notebook.cells.length > 0
   const [validationRuns, setValidationRuns] = useState<Record<string, ValidationRun>>({})
   const visualContext = useNotebookVisualContext()
@@ -107,7 +107,17 @@ export default function App() {
                 cell={cell}
                 datasets={datasets}
                 models={models}
+                queries={queries}
+                queryEvaluations={queryEvaluations}
                 onRemoveDataset={actions.removeDataset}
+                onTransformDataset={(datasetId, tableId) => void actions.createQueryFromDataset(datasetId, tableId)}
+                onRenameQuery={(queryId, name) => void actions.renameQuery(queryId, name)}
+                onAddQueryStep={(queryId, input, name) => void actions.addQueryStep(queryId, input, name)}
+                onRenameQueryStep={(queryId, stepId, name) => void actions.renameQueryStep(queryId, stepId, name)}
+                onRemoveQueryStep={(queryId, stepId) => void actions.removeQueryStep(queryId, stepId)}
+                onMoveQueryStep={(queryId, stepId, toIndex) => void actions.moveQueryStep(queryId, stepId, toIndex)}
+                onSetQueryLoadEnabled={(queryId, loadEnabled) => void actions.setQueryLoadEnabled(queryId, loadEnabled)}
+                onDeleteQuery={actions.deleteQuery}
                 onRemoveModel={actions.removeModel}
                 onAddTableToModel={actions.addTableToModel}
                 onRemoveTableFromModel={actions.removeTableFromModel}
@@ -142,6 +152,20 @@ export default function App() {
               <CreateMeasurePanel models={models} datasets={datasets} onCreate={actions.createMeasureCell} />
               <AddTestCellPanel models={models} onCreate={actions.createTestCell} />
               <AddVisualCellPanel models={models} datasets={datasets} onCreate={actions.createVisualCell} />
+              {Object.keys(queries).length > 0 && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => {
+                    const sourceId = window.prompt(
+                      `Reference which query?\n${Object.values(queries).map((q) => `${q.name} (${q.id})`).join('\n')}`,
+                    )
+                    if (sourceId) void actions.createQueryFromQuery(sourceId.trim())
+                  }}
+                >
+                  + Reference Query
+                </button>
+              )}
             </div>
           </div>
         )}

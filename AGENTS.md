@@ -21,22 +21,32 @@ A learner progresses through executable cells that expose data modeling and anal
 7. New cell types require a domain contract and execution contract first.
 8. Lessons must be portable data/config, not hardcoded UI flows.
 
-## Initial supported scope
+## Current supported scope
 
-Focus on:
+The "Initial supported scope" below described the Sprint 1–2 starting point.
+Sprints 3–12 have since shipped well past it — calculated columns, measures,
+CALCULATE, iterators/table expressions, classic time intelligence, advanced
+relationships (USERELATIONSHIP/CROSSFILTER), and a Power Query transformation
+layer (Sprint 12, see docs/POWER_QUERY_RUNTIME.md) all exist in-repo. Treat
+this list as scope history, not a current restriction — check ROADMAP.md for
+what has actually shipped before assuming something is out of scope.
+
+Delivered:
 
 - local datasets
-- one-to-many relationships
+- one-to-many, one-to-one, many-to-many and bidirectional relationships
 - calculated columns
-- foundational measures
+- measures, including CALCULATE, iterators, and classic time intelligence
 - row/filter context
-- validation
+- validation, including staleness tracking
 - explanation traces
+- Power Query: typed Applied Steps, query dependency graph, Merge/Append (Sprint 12)
 
-Avoid:
+Still avoid (no roadmap phase has required these):
 
-- full DAX
-- Power Query
+- an arbitrary Power Query M parser/interpreter or query folding (Sprint 12
+  implements Power Query's transformation workflow through typed steps only —
+  see docs/POWER_QUERY_RUNTIME.md "M-language boundary")
 - Power BI Service/Fabric
 - deployment infrastructure
 - authentication

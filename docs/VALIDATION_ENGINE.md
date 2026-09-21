@@ -334,6 +334,19 @@ in transient UI state (`App.tsx`'s `validationRuns` map) so the UI can tell a
 current result from a stale one and either hide it or show "Result
 outdated — run validation again."
 
+**Sprint 12 addition**: when a `ModelTable`'s dataset is Power-Query-sourced
+(`Dataset.source.type === 'query'`), the fingerprint payload also includes
+`source.revision` — the query's own semantic fingerprint, rolled up through
+its dependencies (`runtime/query/queryFingerprint.ts`). This is the one
+change that makes a *row-only* query edit (Filter Rows, Replace Values,
+Remove Duplicates — nothing that touches schema) correctly turn a PASS into
+STALE. Without it, the "tables" fingerprint payload above (name + column
+names/types) would be byte-identical before and after such an edit, and a
+stale PASS would keep showing as current. See
+[`POWER_QUERY_RUNTIME.md`](./POWER_QUERY_RUNTIME.md) "Validation staleness"
+and `tests/runtime/validation/queryValidationStaleness.test.ts` for the
+mandatory PASS→STALE proof.
+
 ## Persistence boundaries
 
 ```text
@@ -487,3 +500,13 @@ now).
   `ExpressionSemanticAssertion` the same way.
 - No historical progress or attempt tracking — `ValidationRun` is always the
   current-state score only (ROADMAP.md Phase 8).
+- No `'query-result'` rule type (row count / column presence-and-type /
+  specific row value on a query's output) — the Sprint 12 brief called this
+  out as optional ("do NOT build a full Power Query course yet"), and the
+  existing `table-present`/`calculated-column-result`/`measure-result` rules
+  already grade a query's output indirectly once it's registered on a
+  model (a query-sourced `ModelTable` is validated exactly like a raw one).
+  A dedicated `query-result` rule — with its own `QuerySelector { queryName
+  }` author-selector, mirroring `TableSelector` — is a natural next step for
+  a future Power Query practice checkpoint (ROADMAP.md "Later, only if
+  validated").

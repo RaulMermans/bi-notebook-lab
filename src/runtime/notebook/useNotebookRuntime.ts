@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { CalculatedColumnCell, MeasureCell, ModelCell, NotebookCell, TestCell } from '../../domain/notebook'
+import type { CalculatedColumnCell, MeasureCell, ModelCell, NotebookCell, QueryCell, TestCell } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
 import type { ColumnRef, TableRef } from '../../domain/model'
 import type { ValidationSpec } from '../../domain/validation'
 import type { VisualSpec } from '../../domain/visual'
 import { deleteDataset, loadDatasets, loadNotebook, saveDataset, saveNotebook } from '../../persistence/notebookStore'
 import { deleteModel, loadModels, saveModel } from '../../persistence/modelStore'
+import { deleteQuery as deleteQueryRecord, loadQueries, saveQuery } from '../../persistence/queryStore'
 import type { CalculatedColumnInput } from '../calculatedColumn/calculatedColumnRuntime'
 import type { MeasureInput } from '../measure/measureRuntime'
 import type { RelationshipConfigInput } from '../model/modelRuntime'
+import type { NewStepInput } from '../query/queryStepFactory'
+import type { DeleteQueryResult } from './notebookRuntime'
 import { NotebookRuntime, emptyNotebook } from './notebookRuntime'
 
 export type HydrationStatus = 'loading' | 'ready'
@@ -24,7 +27,7 @@ export type HydrationStatus = 'loading' | 'ready'
 export function useNotebookRuntime() {
   const runtimeRef = useRef<NotebookRuntime | null>(null)
   if (!runtimeRef.current) {
-    runtimeRef.current = new NotebookRuntime({ notebook: emptyNotebook('Retail Foundations'), datasets: {}, models: {} })
+    runtimeRef.current = new NotebookRuntime({ notebook: emptyNotebook('Retail Foundations'), datasets: {}, models: {}, queries: {}, queryEvaluations: {} })
   }
   const runtime = runtimeRef.current
 
@@ -45,9 +48,14 @@ export function useNotebookRuntime() {
         const modelIds = persisted.cells
           .filter((cell): cell is Extract<NotebookCell, { kind: 'model' }> => cell.kind === 'model')
           .map((cell) => cell.modelId)
-        const [datasets, models] = await Promise.all([loadDatasets(datasetIds), loadModels(modelIds)])
+        const queryIds = persisted.cells
+          .filter((cell): cell is Extract<NotebookCell, { kind: 'query' }> => cell.kind === 'query')
+          .map((cell) => cell.queryId)
+        const [datasets, models, queries] = await Promise.all([loadDatasets(datasetIds), loadModels(modelIds), loadQueries(queryIds)])
         if (cancelled) return
-        runtime.replaceAll({ notebook: persisted, datasets, models })
+        runtime.replaceAll({ notebook: persisted, datasets, models, queries, queryEvaluations: {} })
+        // Query evaluations are never persisted (brief §52 hydration order) — recompute them once, after raw datasets/queries are in place.
+        runtime.refreshQueries()
       }
 
       setStatus('ready')
@@ -192,9 +200,67 @@ export function useNotebookRuntime() {
       removeVisualCell(cellId: string): void {
         runtime.removeVisualCell(cellId)
       },
+      async createQueryFromDataset(datasetId: string, tableId: string, name?: string): Promise<QueryCell> {
+        const { cell, query } = runtime.createQueryFromDataset(datasetId, tableId, name)
+        await saveQuery(query)
+        return cell
+      },
+      async createQueryFromQuery(sourceQueryId: string, name?: string): Promise<QueryCell | undefined> {
+        const result = runtime.createQueryFromQuery(sourceQueryId, name)
+        if (result) await saveQuery(result.query)
+        return result?.cell
+      },
+      async renameQuery(queryId: string, name: string): Promise<void> {
+        runtime.renameQuery(queryId, name)
+        const query = runtime.getQuery(queryId)
+        if (query) await saveQuery(query)
+      },
+      async addQueryStep(queryId: string, input: NewStepInput, name?: string): Promise<void> {
+        runtime.addQueryStep(queryId, input, name)
+        const query = runtime.getQuery(queryId)
+        if (query) await saveQuery(query)
+      },
+      async updateQueryStep(queryId: string, stepId: string, patch: Record<string, unknown>): Promise<void> {
+        runtime.updateQueryStep(queryId, stepId, patch)
+        const query = runtime.getQuery(queryId)
+        if (query) await saveQuery(query)
+      },
+      async renameQueryStep(queryId: string, stepId: string, name: string): Promise<void> {
+        runtime.renameQueryStep(queryId, stepId, name)
+        const query = runtime.getQuery(queryId)
+        if (query) await saveQuery(query)
+      },
+      async removeQueryStep(queryId: string, stepId: string): Promise<void> {
+        runtime.removeQueryStep(queryId, stepId)
+        const query = runtime.getQuery(queryId)
+        if (query) await saveQuery(query)
+      },
+      async moveQueryStep(queryId: string, stepId: string, toIndex: number): Promise<void> {
+        runtime.moveQueryStep(queryId, stepId, toIndex)
+        const query = runtime.getQuery(queryId)
+        if (query) await saveQuery(query)
+      },
+      async setQueryLoadEnabled(queryId: string, loadEnabled: boolean): Promise<void> {
+        runtime.setQueryLoadEnabled(queryId, loadEnabled)
+        const query = runtime.getQuery(queryId)
+        if (query) await saveQuery(query)
+      },
+      async deleteQuery(queryId: string): Promise<DeleteQueryResult> {
+        const result = runtime.deleteQuery(queryId)
+        if (result.deleted) await deleteQueryRecord(queryId)
+        return result
+      },
     }),
     [runtime],
   )
 
-  return { notebook: snapshot.notebook, datasets: snapshot.datasets, models: snapshot.models, status, actions }
+  return {
+    notebook: snapshot.notebook,
+    datasets: snapshot.datasets,
+    models: snapshot.models,
+    queries: snapshot.queries,
+    queryEvaluations: snapshot.queryEvaluations,
+    status,
+    actions,
+  }
 }

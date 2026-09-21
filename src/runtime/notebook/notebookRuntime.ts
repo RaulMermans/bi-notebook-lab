@@ -1,6 +1,7 @@
-import type { CalculatedColumnCell, GenericNotebookCell, MeasureCell, ModelCell, NotebookCell, NotebookDocument, TestCell, VisualCell } from '../../domain/notebook'
-import type { Dataset } from '../../domain/data'
+import type { CalculatedColumnCell, GenericNotebookCell, MeasureCell, ModelCell, NotebookCell, NotebookDocument, QueryCell, TestCell, VisualCell } from '../../domain/notebook'
+import { DATA_LIMITS, type Dataset } from '../../domain/data'
 import type { CalculatedColumn, ColumnRef, Measure, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
+import type { QueryDefinition } from '../../domain/query'
 import type { ValidationSpec } from '../../domain/validation'
 import type { VisualSpec } from '../../domain/visual'
 import type { ExpressionDiagnostic } from '../../expression/diagnostics'
@@ -12,11 +13,27 @@ import type { MeasureExecution, MeasureInput } from '../measure/measureRuntime'
 import * as modelRuntime from '../model/modelRuntime'
 import * as dateTableRuntime from '../dateTable/dateTableRuntime'
 import type { DateTableDiagnostic } from '../dateTable/dateTableTypes'
+import * as queryRuntime from '../query/queryRuntime'
+import type { QueryEvaluationDetail } from '../query/queryRuntime'
+import type { NewStepInput } from '../query/queryStepFactory'
 
 export interface NotebookRuntimeSnapshot {
   notebook: NotebookDocument
+  /** Raw imported datasets AND load-enabled query outputs, keyed by id — the single boundary the rest of the BI engine consumes (brief §51, §54). */
   datasets: Record<string, Dataset>
   models: Record<string, SemanticModel>
+  /** Persisted query definitions. */
+  queries: Record<string, QueryDefinition>
+  /** Always re-derived, never persisted — the latest evaluation of every query (brief §12, §50). */
+  queryEvaluations: Record<string, QueryEvaluationDetail>
+}
+
+export interface DeleteQueryResult {
+  deleted: boolean
+  /** Other queries that reference this one (Merge/Append/source-of) — deletion is blocked while any exist (brief §82). */
+  blockedByQueries: string[]
+  /** Models whose tables reference this query's output — informational; deletion still proceeds (brief §82 "warn clearly ... no silent cascading destruction"). */
+  referencedByModels: string[]
 }
 
 export function emptyNotebook(title = 'Untitled Notebook'): NotebookDocument {
@@ -59,9 +76,35 @@ export class NotebookRuntime {
     notebook: NotebookDocument,
     datasets: Record<string, Dataset> = this.snapshot.datasets,
     models: Record<string, SemanticModel> = this.snapshot.models,
+    queries: Record<string, QueryDefinition> = this.snapshot.queries,
+    queryEvaluations: Record<string, QueryEvaluationDetail> = this.snapshot.queryEvaluations,
   ): void {
-    this.snapshot = { notebook, datasets, models }
+    this.snapshot = { notebook, datasets, models, queries, queryEvaluations }
     this.listeners.forEach((listener) => listener())
+  }
+
+  /**
+   * Re-evaluates every query against the current raw+derived dataset
+   * registry and folds load-enabled outputs back into `datasets` — the only
+   * place query evaluation happens (brief §53, §83 `evaluateQuery()`). A
+   * disabled query's output is removed from `datasets` so it can't be
+   * registered on a Semantic Model, but stays resolvable by name/id for
+   * sibling queries that reference it as a source (brief §43).
+   */
+  private reEvaluateQueries(queries: Record<string, QueryDefinition>): void {
+    const queryEvaluations = queryRuntime.evaluateAllQueries(queries, this.snapshot.datasets, DATA_LIMITS)
+    const datasets = { ...this.snapshot.datasets }
+
+    for (const query of Object.values(queries)) {
+      if (!query.loadEnabled) {
+        delete datasets[query.outputDatasetId]
+        continue
+      }
+      const evaluation = queryEvaluations[query.id]
+      if (evaluation.output) datasets[query.outputDatasetId] = evaluation.output
+    }
+
+    this.commit(this.snapshot.notebook, datasets, this.snapshot.models, queries, queryEvaluations)
   }
 
   replaceAll(next: NotebookRuntimeSnapshot): void {
@@ -132,6 +175,126 @@ export class NotebookRuntime {
     const datasets = { ...this.snapshot.datasets }
     delete datasets[datasetId]
     this.commit({ ...this.snapshot.notebook, cells }, datasets)
+  }
+
+  /** Recomputes every query's evaluation and folds load-enabled outputs into `datasets`. Query evaluations are never persisted, so hydration calls this once after `replaceAll` loads the persisted `QueryDefinition`s (brief §52 hydration order). */
+  refreshQueries(): void {
+    this.reEvaluateQueries(this.snapshot.queries)
+  }
+
+  getQuery(queryId: string): QueryDefinition | undefined {
+    return this.snapshot.queries[queryId]
+  }
+
+  getQueryEvaluation(queryId: string): QueryEvaluationDetail | undefined {
+    return this.snapshot.queryEvaluations[queryId]
+  }
+
+  private addQueryDefinition(query: QueryDefinition, title: string): QueryCell {
+    const cell: QueryCell = { id: generateId('cell'), kind: 'query', title, queryId: query.id, status: 'idle' }
+    const cells = [...this.snapshot.notebook.cells, cell]
+    const queries = { ...this.snapshot.queries, [query.id]: query }
+    this.commit({ ...this.snapshot.notebook, cells }, this.snapshot.datasets, this.snapshot.models, queries)
+    this.reEvaluateQueries(queries)
+    return cell
+  }
+
+  /** Creates a Power Query `QueryDefinition` sourced from an imported DataCell's table and appends a `QueryCell` — the raw DataCell is left untouched (brief §61, §85 "DataCell vs QueryCell"). */
+  createQueryFromDataset(datasetId: string, tableId: string, name?: string): { cell: QueryCell; query: QueryDefinition } {
+    const dataset = this.snapshot.datasets[datasetId]
+    const table = dataset?.tables.find((t) => t.id === tableId)
+    const query = queryRuntime.createQueryDefinition(name ?? table?.name ?? dataset?.name ?? 'New Query', { kind: 'dataset-table', datasetId, tableId })
+    const cell = this.addQueryDefinition(query, query.name)
+    return { cell, query }
+  }
+
+  /** Creates a query whose source is another query's output — the staging pattern from brief §62 ("Reference Query"). */
+  createQueryFromQuery(sourceQueryId: string, name?: string): { cell: QueryCell; query: QueryDefinition } | undefined {
+    const source = this.getQuery(sourceQueryId)
+    if (!source) return undefined
+    const query = queryRuntime.createQueryDefinition(name ?? `${source.name} (2)`, { kind: 'query', queryId: sourceQueryId })
+    const cell = this.addQueryDefinition(query, query.name)
+    return { cell, query }
+  }
+
+  renameQuery(queryId: string, name: string): void {
+    const query = this.getQuery(queryId)
+    if (!query) return
+    const renamed = queryRuntime.renameQuery(query, name)
+    const cells = this.snapshot.notebook.cells.map((cell) => (cell.kind === 'query' && cell.queryId === queryId ? { ...cell, title: name } : cell))
+    const queries = { ...this.snapshot.queries, [queryId]: renamed }
+    this.commit({ ...this.snapshot.notebook, cells }, this.snapshot.datasets, this.snapshot.models, queries)
+    this.reEvaluateQueries(queries)
+  }
+
+  addQueryStep(queryId: string, input: NewStepInput, name?: string): void {
+    const query = this.getQuery(queryId)
+    if (!query) return
+    const queries = { ...this.snapshot.queries, [queryId]: queryRuntime.addQueryStep(query, input, name) }
+    this.reEvaluateQueries(queries)
+  }
+
+  updateQueryStep(queryId: string, stepId: string, patch: Record<string, unknown>): void {
+    const query = this.getQuery(queryId)
+    if (!query) return
+    const queries = { ...this.snapshot.queries, [queryId]: queryRuntime.updateQueryStep(query, stepId, patch) }
+    this.reEvaluateQueries(queries)
+  }
+
+  renameQueryStep(queryId: string, stepId: string, name: string): void {
+    const query = this.getQuery(queryId)
+    if (!query) return
+    const queries = { ...this.snapshot.queries, [queryId]: queryRuntime.renameQueryStep(query, stepId, name) }
+    this.commit(this.snapshot.notebook, this.snapshot.datasets, this.snapshot.models, queries, this.snapshot.queryEvaluations)
+  }
+
+  /** Deletes a step; every downstream step re-evaluates against the state before it (brief §71 "Step Undo via Delete"). */
+  removeQueryStep(queryId: string, stepId: string): void {
+    const query = this.getQuery(queryId)
+    if (!query) return
+    const queries = { ...this.snapshot.queries, [queryId]: queryRuntime.removeQueryStep(query, stepId) }
+    this.reEvaluateQueries(queries)
+  }
+
+  moveQueryStep(queryId: string, stepId: string, toIndex: number): void {
+    const query = this.getQuery(queryId)
+    if (!query) return
+    const queries = { ...this.snapshot.queries, [queryId]: queryRuntime.moveQueryStep(query, stepId, toIndex) }
+    this.reEvaluateQueries(queries)
+  }
+
+  /** Toggling load off removes the query's output from `datasets` (so it can't be registered on a Semantic Model) but keeps it resolvable for sibling queries (brief §43). */
+  setQueryLoadEnabled(queryId: string, loadEnabled: boolean): void {
+    const query = this.getQuery(queryId)
+    if (!query) return
+    const queries = { ...this.snapshot.queries, [queryId]: queryRuntime.setQueryLoadEnabled(query, loadEnabled) }
+    this.reEvaluateQueries(queries)
+  }
+
+  /** Fail-safe delete (brief §82): blocked while another query still depends on this one; only warns (and still proceeds) when a Semantic Model references its output. */
+  deleteQuery(queryId: string): DeleteQueryResult {
+    const query = this.getQuery(queryId)
+    if (!query) return { deleted: false, blockedByQueries: [], referencedByModels: [] }
+
+    const blockedByQueries = queryRuntime.findDependentQueryIds(this.snapshot.queries, queryId)
+    const referencedByModels = Object.values(this.snapshot.models)
+      .filter((model) => model.tables.some((t) => t.datasetId === query.outputDatasetId))
+      .map((model) => model.id)
+
+    if (blockedByQueries.length > 0) {
+      return { deleted: false, blockedByQueries, referencedByModels }
+    }
+
+    const queries = { ...this.snapshot.queries }
+    delete queries[queryId]
+    const cells = this.snapshot.notebook.cells.filter((cell) => !(cell.kind === 'query' && cell.queryId === queryId))
+    this.commit({ ...this.snapshot.notebook, cells }, this.snapshot.datasets, this.snapshot.models, queries)
+    this.reEvaluateQueries(queries)
+    const datasets = { ...this.snapshot.datasets }
+    delete datasets[query.outputDatasetId]
+    this.commit(this.snapshot.notebook, datasets, this.snapshot.models, this.snapshot.queries, this.snapshot.queryEvaluations)
+
+    return { deleted: true, blockedByQueries: [], referencedByModels }
   }
 
   getModel(modelId: string): SemanticModel | undefined {

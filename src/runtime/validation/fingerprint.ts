@@ -1,17 +1,8 @@
 import type { Dataset } from '../../domain/data'
 import type { SemanticModel } from '../../domain/model'
 import type { ValidationRun, ValidationSpec } from '../../domain/validation'
+import { hashString } from '../../lib/hash'
 import { resolveTableRef } from '../model/modelRuntime'
-
-/** Deterministic, dependency-free 32-bit string hash (FNV-1a) — good enough for change-detection, not cryptographic use. */
-function hashString(input: string): string {
-  let hash = 0x811c9dc5
-  for (let i = 0; i < input.length; i += 1) {
-    hash ^= input.charCodeAt(i)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0')
-}
 
 /**
  * A fingerprint over exactly the semantic inputs a validation run depends
@@ -21,6 +12,13 @@ function hashString(input: string): string {
  * table must never invalidate a previous result (docs/VALIDATION_ENGINE.md
  * "Staleness"). Two models that differ only in ways that don't affect this
  * fingerprint are indistinguishable to validation, by design.
+ *
+ * A table sourced from a Power Query `Dataset` (`source.type === 'query'`)
+ * also contributes its `revision` — Sprint 12's query fingerprint rolled up
+ * through dependencies (see `runtime/query/queryFingerprint.ts`). This is
+ * what makes a row-only edit (Filter Rows, Replace Values, Remove
+ * Duplicates) invalidate a PASS even though the schema never changed
+ * (docs/POWER_QUERY_RUNTIME.md "Validation staleness").
  */
 export function computeValidationFingerprint(model: SemanticModel, datasets: Record<string, Dataset>, spec: ValidationSpec): string {
   const tables = [...model.tables]
@@ -30,6 +28,7 @@ export function computeValidationFingerprint(model: SemanticModel, datasets: Rec
         tableId: t.tableId,
         datasetId: t.datasetId,
         tableName: resolved?.table.name ?? null,
+        datasetRevision: resolved?.dataset.source.type === 'query' ? resolved.dataset.source.revision : null,
         columns:
           resolved?.table.columns
             .map((c) => ({ name: c.name, dataType: c.dataType }))

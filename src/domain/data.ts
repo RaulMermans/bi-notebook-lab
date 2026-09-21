@@ -27,6 +27,15 @@ export type DatasetSource =
   | { type: 'csv'; fileName: string }
   | { type: 'xlsx'; fileName: string; sheetName: string }
   | { type: 'sample'; key: string }
+  /**
+   * Sprint 12: the dataset is a Power Query output, not a raw import.
+   * `revision` is the query's semantic fingerprint rolled up through its
+   * dependencies (`runtime/query/queryFingerprint.ts`) — it changes exactly
+   * when re-evaluating the query would produce different output, and is
+   * folded into the Validation Engine fingerprint (docs/POWER_QUERY_RUNTIME.md
+   * "Validation staleness").
+   */
+  | { type: 'query'; queryId: string; revision: string }
 
 export interface Dataset {
   id: string

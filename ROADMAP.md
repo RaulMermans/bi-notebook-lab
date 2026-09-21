@@ -412,6 +412,62 @@ details, architecture, and known Power BI compatibility boundaries.
 
 ---
 
+## Phase 8.8 — Power Query & Data Transformation Runtime ✅ complete
+
+> Referred to as "Sprint 12" in its own implementation brief.
+
+- a genuine pre-model transformation layer:
+  `RAW SOURCE → Power Query (Applied Steps) → Semantic Model → DAX → Visuals`,
+  distinct from — and never implemented by mutating — `SemanticModel`/
+  `CalculatedColumn`
+- `QueryDefinition` (`domain/query.ts`): persisted source + typed Applied
+  Steps + a stable `outputDatasetId`/`outputTableId` that survives every
+  re-evaluation, so model/relationship references never break when a step
+  is edited
+- a 14-member `QueryStep` discriminated union: Rename/Remove/Reorder
+  Columns, Change Type, Filter Rows, Replace Values, Remove Duplicates,
+  Sort Rows, Fill Down/Up, Split Column, Merge Columns, Group By, Merge
+  Queries (all six join kinds, indexed hash join, multi-column typed
+  composite keys), Append Queries (name-union schema, a small documented
+  type-promotion lattice)
+- schema-preserving steps keep every `DataColumn.id`; schema-generating
+  steps (Split/Merge Columns, Group By aggregations, Merge expand columns,
+  Append's schema union) get ids generated exactly once at step creation,
+  never during evaluation
+- a query dependency graph (`runtime/query/queryGraph.ts`) for
+  query-as-source/Merge/Append references, with dependency-first evaluation
+  order and fail-closed cycle/missing-dependency detection
+- a deterministic query fingerprint rolled up through dependencies, folded
+  into a query-sourced table's `DatasetSource.revision` and, from there,
+  into the Validation Engine's fingerprint — a row-only query edit (Filter
+  Rows, Replace Values, Remove Duplicates) now correctly turns a passing
+  `TestCell` STALE even though the schema never changed
+- a real `QueryCell` (`kind: 'query'`) with an Applied Steps UI: add /
+  rename / reorder / delete a step, click any step to preview the pipeline
+  as of that point, per-step row/column metrics, and a Step Failure
+  Boundary that stops the pipeline at the first failure and marks every
+  later step `'skipped'` rather than executing against invalid state
+- `NotebookRuntime` folds every load-enabled query's output back into the
+  same `datasets` map `DataCell` has always used — the Semantic Model,
+  Calculated Columns, Measures, `CALCULATE`, iterators, time intelligence,
+  relationships and Visual Runtime require zero Power-Query-aware code
+- a seeded Power Query Lab sample (`Sales_Jan`/`Sales_Feb`/`Products`/
+  `Customers_Dirty`) with real messiness — duplicate rows, dirty text
+  values, a text-formatted numeric-id column, an append-compatible but
+  schema-mismatched month pair, a Merge lookup table — and four
+  independently-verified acceptance workflows (Clean Customers, Append
+  Sales, Merge Products, Group By Category)
+
+**Exit:** the practice environment now covers the full Power BI Desktop
+workflow shape — `Power Query → Semantic Model → DAX → Visuals` — not just
+the modeling/DAX half of it. See
+[`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md) and
+[`docs/APPLIED_STEPS.md`](./docs/APPLIED_STEPS.md) for implementation
+details, architecture, and known Power Query compatibility boundaries
+(no M parser, no query folding, no fuzzy merge, no Pivot/Unpivot).
+
+---
+
 ## Phase 9 — Learning System
 
 - lesson catalog
@@ -440,11 +496,15 @@ details, architecture, and known Power BI compatibility boundaries.
 
 ## Later, only if validated
 
-- **Power Query & Data Transformation Runtime** (recommended next, now that
-  Phase 8.7's generic relationship model exists) — rename/remove columns,
-  change types, filter rows, replace values, remove duplicates, group by,
-  and merge/append queries, as a learnable pre-model data-shaping step
-  ahead of the existing import pipeline.
+- **Advanced Power Query + M Fundamentals** (recommended next, now that
+  Phase 8.8's Query Runtime exists) — Pivot/Unpivot, Conditional Column,
+  Index Column, Custom Column, and basic/generated-M concepts, bounded to
+  the same typed-step architecture (still no arbitrary M interpreter).
+- **Calculated Tables & Advanced Model Objects** (the alternative Sprint 13
+  candidate) — `CALENDAR`/`CALENDARAUTO`, `SELECTCOLUMNS`/`ADDCOLUMNS`,
+  `SUMMARIZE`, and calculated tables built from DAX table expressions
+  rather than an import/query. Reassess which gap matters more once the
+  Query Runtime has seen real use.
 - custom datasets
 - shareable notebooks
 - desktop wrapper

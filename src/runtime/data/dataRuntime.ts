@@ -4,6 +4,7 @@ import { parseCsvText } from '../../lib/csv/parseCsv'
 import { generateId } from '../../lib/ids'
 import { generateRetailDataset } from '../../lib/sample/generateRetailDataset'
 import { generateRelationshipLabDataset } from '../../lib/sample/generateRelationshipLabDataset'
+import { generatePowerQueryLabDataset } from '../../lib/sample/generatePowerQueryLabDataset'
 
 function tableNameFromFileName(fileName: string): string {
   return fileName.replace(/\.[^./]+$/, '') || fileName
@@ -85,4 +86,8 @@ export function loadSampleRetailDataset(): Dataset[] {
 
 export function loadSampleRelationshipLabDataset(): Dataset[] {
   return generateRelationshipLabDataset()
+}
+
+export function loadSamplePowerQueryLabDataset(): Dataset[] {
+  return generatePowerQueryLabDataset()
 }

@@ -36,6 +36,36 @@ Expected output:
 - inferred schema
 - data-quality summary
 
+### QueryCell
+Runs a Power Query Applied Steps pipeline against a raw `DataCell` table (or
+another query's output) and produces a transformed table the Semantic Model
+can register. Backed by a real domain/execution contract since Sprint 12 —
+see [`../docs/POWER_QUERY_RUNTIME.md`](../docs/POWER_QUERY_RUNTIME.md) and
+[`../docs/APPLIED_STEPS.md`](../docs/APPLIED_STEPS.md).
+
+Contract (`src/domain/notebook.ts`):
+```ts
+interface QueryCell extends BaseNotebookCell {
+  kind: 'query'
+  queryId: string
+}
+```
+`queryId` is always required — the cell stores a reference only; the actual
+`QueryDefinition` (source, Applied Steps, load state) lives in the notebook
+runtime's query store, mirroring `ModelCell`. **`DataCell` vs `QueryCell`**:
+a `DataCell` is always the immutable raw source; a `QueryCell` is always a
+transformation of one. Creating a query from a `DataCell` (`Transform Data`)
+never mutates or removes the original `DataCell` — both stay visible.
+
+Expected output:
+- the query's evaluated `Dataset` (persisted only as a re-derived value —
+  see docs/POWER_QUERY_RUNTIME.md "Definitions vs. results"), registered
+  into the shared `datasets` map when `loadEnabled` is true
+- per-step metrics (row/column counts) and diagnostics, recomputed on every
+  evaluation
+- the frame as of any selected Applied Step, for the "select a step, see its
+  result" preview (never persisted)
+
 ### ModelCell
 Allows creation of table relationships.
 

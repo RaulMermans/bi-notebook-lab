@@ -2,6 +2,25 @@
 
 The product teaches BI through progressively exposed abstractions.
 
+## Level 0 — Data shaping
+
+Questions:
+- Is this column the right type, or does it just look right?
+- Which rows are duplicates, and which are legitimately repeated?
+- What does a blank actually mean here?
+- Should this transformation happen once, upstream, or every time someone
+  builds a measure?
+
+Sprint 12's Power Query layer (see
+[`POWER_QUERY_RUNTIME.md`](./POWER_QUERY_RUNTIME.md) and
+[`APPLIED_STEPS.md`](./APPLIED_STEPS.md)) is where these questions get
+asked, before a table ever reaches Level 1. This is deliberately a distinct
+level from Level 1's "what is the grain, which columns are keys" — Level 0
+is about *cleaning and shaping* the data a learner was handed; Level 1 is
+about *modeling* the data once it's trustworthy. A learner who tries to
+build relationships on top of a text-formatted numeric key, or a table full
+of duplicate rows, hits a wall at Level 1 that Level 0 exists to prevent.
+
 ## Level 1 — Data
 
 Questions:

@@ -1,6 +1,7 @@
 import type { NotebookCell as NotebookCellModel } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
 import type { CalculatedColumn, ColumnRef, Measure, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
+import type { QueryDefinition } from '../../domain/query'
 import type { ValidationRun } from '../../domain/validation'
 import type { VisualSpec } from '../../domain/visual'
 import type { ExpressionDiagnostic } from '../../expression/diagnostics'
@@ -9,11 +10,15 @@ import type { CalculatedColumnExecution } from '../../runtime/calculatedColumn/c
 import type { FilterContext } from '../../runtime/measure/filterContext'
 import type { MeasureExecution } from '../../runtime/measure/measureRuntime'
 import type { RelationshipConfigInput } from '../../runtime/model/modelRuntime'
+import type { DeleteQueryResult } from '../../runtime/notebook/notebookRuntime'
+import type { QueryEvaluationDetail } from '../../runtime/query/queryRuntime'
+import type { NewStepInput } from '../../runtime/query/queryStepFactory'
 import { NotebookCellCard } from '../NotebookCellCard'
 import { CalculatedColumnCellCard } from './CalculatedColumnCellCard'
 import { DataCellCard } from './DataCellCard'
 import { MeasureCellCard } from './MeasureCellCard'
 import { ModelCellCard } from './ModelCellCard'
+import { QueryCellCard } from './query/QueryCellCard'
 import { TestCellCard } from './TestCellCard'
 import { VisualCellCard } from './VisualCellCard'
 
@@ -21,7 +26,17 @@ interface NotebookCellProps {
   cell: NotebookCellModel
   datasets: Record<string, Dataset>
   models: Record<string, SemanticModel>
+  queries: Record<string, QueryDefinition>
+  queryEvaluations: Record<string, QueryEvaluationDetail>
   onRemoveDataset: (datasetId: string) => void
+  onTransformDataset: (datasetId: string, tableId: string) => void
+  onRenameQuery: (queryId: string, name: string) => void
+  onAddQueryStep: (queryId: string, input: NewStepInput, name?: string) => void
+  onRenameQueryStep: (queryId: string, stepId: string, name: string) => void
+  onRemoveQueryStep: (queryId: string, stepId: string) => void
+  onMoveQueryStep: (queryId: string, stepId: string, toIndex: number) => void
+  onSetQueryLoadEnabled: (queryId: string, loadEnabled: boolean) => void
+  onDeleteQuery: (queryId: string) => Promise<DeleteQueryResult>
   onRemoveModel: (modelId: string) => void
   onAddTableToModel: (modelId: string, ref: TableRef) => void
   onRemoveTableFromModel: (modelId: string, modelTableId: string) => void
@@ -60,7 +75,17 @@ export function NotebookCell({
   cell,
   datasets,
   models,
+  queries,
+  queryEvaluations,
   onRemoveDataset,
+  onTransformDataset,
+  onRenameQuery,
+  onAddQueryStep,
+  onRenameQueryStep,
+  onRemoveQueryStep,
+  onMoveQueryStep,
+  onSetQueryLoadEnabled,
+  onDeleteQuery,
   onRemoveModel,
   onAddTableToModel,
   onRemoveTableFromModel,
@@ -87,7 +112,35 @@ export function NotebookCell({
 }: NotebookCellProps) {
   if (cell.kind === 'data') {
     const dataset = datasets[cell.datasetId]
-    return <DataCellCard cell={cell} dataset={dataset} onRemove={() => onRemoveDataset(cell.datasetId)} />
+    return (
+      <DataCellCard
+        cell={cell}
+        dataset={dataset}
+        onRemove={() => onRemoveDataset(cell.datasetId)}
+        onTransformData={(tableId) => onTransformDataset(cell.datasetId, tableId)}
+      />
+    )
+  }
+
+  if (cell.kind === 'query') {
+    const query = queries[cell.queryId]
+    return (
+      <QueryCellCard
+        cell={cell}
+        query={query}
+        evaluation={queryEvaluations[cell.queryId]}
+        queries={queries}
+        queryEvaluations={queryEvaluations}
+        datasets={datasets}
+        onRename={(name) => onRenameQuery(cell.queryId, name)}
+        onAddStep={(input, name) => onAddQueryStep(cell.queryId, input, name)}
+        onRenameStep={(stepId, name) => onRenameQueryStep(cell.queryId, stepId, name)}
+        onRemoveStep={(stepId) => onRemoveQueryStep(cell.queryId, stepId)}
+        onMoveStep={(stepId, toIndex) => onMoveQueryStep(cell.queryId, stepId, toIndex)}
+        onSetLoadEnabled={(loadEnabled) => onSetQueryLoadEnabled(cell.queryId, loadEnabled)}
+        onRemove={() => onDeleteQuery(cell.queryId)}
+      />
+    )
   }
 
   if (cell.kind === 'model') {
