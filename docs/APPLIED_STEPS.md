@@ -257,6 +257,127 @@ source that has it passes through unchanged; an `integer`+`decimal` mix
 promotes to `decimal`; any other mismatch (e.g. `number` + `string`) is a
 structured `QUERY_INVALID_STEP_CONFIG` failure — never a silent coercion.
 
+## Pivot Column (`pivot-column`)
+
+```ts
+{ kind: 'pivot-column', pivotColumnId: string, valueColumnId: string, aggregation: 'sum' | 'count' | 'min' | 'max' | 'first' }
+```
+
+Turns distinct values of `pivotColumnId` into their own columns, each
+holding `aggregation` over `valueColumnId` for the rows sharing every other
+(grouping) column's values. Unlike every other schema-generating step, it
+does **not** store its output column ids on the step — they're data-
+dependent (one per distinct pivot value), so they're derived instead by a
+pure deterministic hash. See `docs/POWER_QUERY_RUNTIME.md` "Pivot column
+identity" for the full mechanism and why this is the one step that needs
+it. `sum`/`min`/`max` require a numeric (or, for `min`/`max`,
+`date`/`datetime`) value column; `count`/`first` accept any type — a
+mismatch is `QUERY_PIVOT_AGGREGATION_INVALID`. Two distinct pivot values
+that would produce the same display column name (e.g. `1` and `"1"`, or a
+value colliding with an existing grouping-column name) fail the step with
+`QUERY_PIVOT_SCHEMA_COLLISION` rather than silently overwriting one.
+
+## Unpivot Columns (`unpivot-columns`)
+
+```ts
+{
+  kind: 'unpivot-columns',
+  mode: 'selected' | 'other-columns',
+  columnIds: string[],
+  attributeColumnName: string,
+  attributeColumnId: string,   // generated once at step creation
+  valueColumnName: string,
+  valueColumnId: string,        // generated once at step creation
+}
+```
+
+The inverse of Pivot Column: collapses several "one column per category"
+columns into two — an attribute column (the original column name) and a
+value column (its value) — with one output row per input row per unpivoted
+column. `columnIds` means "the columns to unpivot" in `'selected'` mode and
+"every column to keep untouched" in `'other-columns'` mode, mirroring Power
+Query's own two menu entries over a single column selection (rather than
+inventing a `not: string[]` field for the same idea). `attributeColumnId`/
+`valueColumnId` are ordinary generated-once-at-creation ids, exactly like
+Split Column's `outputColumnIds` — there's no dynamic-schema problem here,
+since there are always exactly two output columns regardless of the data.
+O(rows × selected columns). A missing column in `columnIds` is
+`QUERY_UNPIVOT_COLUMN_NOT_FOUND`; resolving to zero columns to unpivot is
+`QUERY_INVALID_STEP_CONFIG`; an attribute/value column name colliding with
+a kept column is `QUERY_DUPLICATE_COLUMN_NAME`.
+
+## Conditional Column (`conditional-column`)
+
+```ts
+{
+  kind: 'conditional-column',
+  outputColumnId: string,   // generated once at step creation
+  outputName: string,
+  clauses: { columnId: string; operator: QueryFilterOperator; value?: unknown; result: unknown }[],
+  elseValue: unknown,
+}
+```
+
+Clauses are evaluated **in order**; the first matching clause wins (not the
+last, not all of them). Clause matching reuses Filter Rows' exact
+comparison semantics — extracted into a shared
+`runtime/query/steps/scalarMatch.ts` (`matchesOperator`/`matchesCondition`/
+`compareScalars`/`isBlank`) that `filterRows.ts` was refactored to import
+from too, so there is exactly one "does this value satisfy this
+`QueryFilterOperator`" implementation in the whole runtime. The output
+`DataType` is inferred from every value actually produced across `result`s
+and `elseValue` (`runtime/query/steps/inferOutputType.ts`, shared with
+Custom Column below): a small `integer`+`decimal`→`decimal` promotion
+lattice is allowed, but any other mix (e.g. text alongside numbers) fails
+the whole step with `QUERY_CONDITIONAL_INVALID_RESULT_TYPE` rather than
+silently coercing. Zero clauses is `QUERY_INVALID_STEP_CONFIG`; an
+`outputName` colliding with an existing column is
+`QUERY_DUPLICATE_COLUMN_NAME`.
+
+## Index Column (`index-column`)
+
+```ts
+{ kind: 'index-column', outputColumnId: string, outputName: string, start: number, increment: number }
+```
+
+Adds a column counting `start, start + increment, start + 2·increment, ...`
+down the current row order. O(rows). A non-finite `start`/`increment`, or
+`increment === 0`, fails with `QUERY_INDEX_INVALID_CONFIG` rather than
+producing a column of `NaN`/an infinite loop; an `outputName` colliding
+with an existing column is `QUERY_DUPLICATE_COLUMN_NAME`. Output
+`DataType` is `'integer'` when both `start` and `increment` are integers,
+`'decimal'` otherwise.
+
+## Custom Column (`custom-column`)
+
+```ts
+{ kind: 'custom-column', outputColumnId: string, outputName: string, expression: string }
+```
+
+Adds a column computed from a small, bounded scalar expression — `[Column]`
+references, arithmetic, text concatenation, comparisons, `if...then...else`,
+and a small `Text.*`/`Number.*`/`Date.*` function set. `expression` is raw
+source text: it's parsed and bound fresh on every evaluation (cheap, and
+avoids persisting an AST), never `eval`/`new Function`. See
+[`docs/POWER_QUERY_EXPRESSIONS.md`](./POWER_QUERY_EXPRESSIONS.md) for the
+full grammar, function set, and safety design. A parse failure is
+`QUERY_CUSTOM_PARSE_ERROR`; an unresolved `[Column]` reference is
+`QUERY_CUSTOM_COLUMN_NOT_FOUND`; a row-level runtime type error is
+`QUERY_CUSTOM_TYPE_ERROR`; dividing by zero is `QUERY_CUSTOM_DIVIDE_BY_ZERO`.
+Output `DataType` is inferred the same way as Conditional Column, via the
+shared `inferOutputType`; an `outputName` colliding with an existing column
+is `QUERY_DUPLICATE_COLUMN_NAME`. Any of these failures fails the **entire
+step** (Step Failure Boundary) — Custom Column never partially applies
+across rows.
+
+The Applied Steps UI form for this step (`CustomColumnForm` in
+`queryStepForms.tsx`) is a plain `<textarea>` — not a code editor — that
+live-parses+binds on every keystroke purely to show an inline diagnostic
+(`<p className="query-form__error">`) before the learner even clicks Apply.
+This preview is **not authoritative**: the real parse/bind/evaluate happens
+again, independently, inside `steps/customColumn.ts` at evaluation time —
+the form's live check is a convenience, not a second source of truth.
+
 ## Diagnostic codes
 
 Every step evaluator and the top-level runtime use exactly these codes
@@ -281,6 +402,16 @@ to the learner:
 | `QUERY_STEP_FAILED` | Generic fallback for a step failure not covered above. |
 | `QUERY_NOT_LOADED` | A load-disabled query's output was asked for by something that requires Enable Load. |
 | `QUERY_NO_COLUMNS` | Remove Columns would leave zero columns. |
+| `QUERY_PIVOT_VALUE_TYPE_INVALID` | Pivot Column's value column isn't a valid type for the chosen aggregation. |
+| `QUERY_PIVOT_AGGREGATION_INVALID` | Pivot Column's aggregation doesn't match its value column's type (e.g. `sum` over text). |
+| `QUERY_PIVOT_SCHEMA_COLLISION` | Two distinct pivot values would produce the same output column name. |
+| `QUERY_UNPIVOT_COLUMN_NOT_FOUND` | Unpivot Columns references a column id that no longer exists. |
+| `QUERY_CONDITIONAL_INVALID_RESULT_TYPE` | Conditional Column's clause results/`elseValue` mix incompatible types. |
+| `QUERY_INDEX_INVALID_CONFIG` | Index Column's `start`/`increment` is non-finite, or `increment` is `0`. |
+| `QUERY_CUSTOM_PARSE_ERROR` | Custom Column's expression failed to lex, parse, or bind (unresolved function, wrong arity). |
+| `QUERY_CUSTOM_COLUMN_NOT_FOUND` | Custom Column's expression references a `[Column]` that doesn't exist on the input. |
+| `QUERY_CUSTOM_TYPE_ERROR` | Custom Column's expression hit a row where an operator/function received the wrong type. |
+| `QUERY_CUSTOM_DIVIDE_BY_ZERO` | Custom Column's expression divided by zero on some row. |
 
 ## UI scope note
 

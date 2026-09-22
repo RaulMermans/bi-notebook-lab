@@ -904,6 +904,183 @@ above ("the same model can later power ... saved lessons"). See
 [`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md) for the full domain
 model, validation integration, and persistence/staleness boundaries.
 
+## Sprint 14 implementation (Advanced Applied Steps, Direct Query Validation & Multi-Checkpoint Learning)
+
+New files:
+
+```text
+runtime/query/steps/
+  pivotColumn.ts, unpivotColumns.ts, conditionalColumn.ts,
+  indexColumn.ts, customColumn.ts     one pure evaluator per new step kind
+  pivotIdentity.ts                    canonicalPivotKey/pivotDisplayName/
+                                        pivotOutputColumnId — the deterministic-
+                                        hash identity strategy for Pivot's
+                                        data-dependent output columns
+  scalarMatch.ts                       matchesOperator/matchesCondition/
+                                        compareScalars/isBlank, extracted out
+                                        of filterRows.ts so Conditional Column
+                                        reuses Filter Rows' comparison
+                                        semantics instead of a second copy
+  inferOutputType.ts                   shared by Conditional Column and
+                                        Custom Column: infers an output
+                                        DataType from values actually
+                                        produced, with a small integer+
+                                        decimal→decimal promotion lattice
+
+runtime/query/expression/             NEW — the Custom Column expression
+                                        subsystem, deliberately not reusing
+                                        expression/* (the DAX engine) or
+                                        implementing M (docs/
+                                        POWER_QUERY_EXPRESSIONS.md)
+  lexer.ts, parser.ts, ast.ts, binder.ts, functions.ts, evaluator.ts,
+  evalError.ts
+
+runtime/validation/queryValidation.ts  evaluators for the 6 new
+                                        'query-*' ValidationRule types —
+                                        never touch SemanticModel
+                                        (docs/QUERY_VALIDATION.md)
+
+data/lessons/powerQueryLesson.ts               4th built-in lesson (all
+                                                 workspace-scoped checkpoints)
+data/exercises/powerQueryLessonValidation.ts   its 4 ValidationSpecs
+lib/sample/generateMonthlyTargetsDataset.ts    NEW small wide-format fixture
+                                                 purpose-built for Unpivot
+
+docs/QUERY_VALIDATION.md, docs/POWER_QUERY_EXPRESSIONS.md
+```
+
+Modified files, and exactly what changed:
+
+```text
+domain/query.ts                    + PivotColumnStep/UnpivotColumnsStep/
+                                       ConditionalColumnStep/IndexColumnStep/
+                                       CustomColumnStep in the QueryStep
+                                       union; + 10 new QueryDiagnosticCode
+                                       members
+runtime/query/queryStepFactory.ts    + a factory case per new step kind
+runtime/query/queryEvaluator.ts      + a runStep dispatch case per new kind
+components/notebook/query/
+  queryStepForms.tsx, QueryCellCard.tsx   + a form/toolbar entry per new
+                                            step kind, including
+                                            CustomColumnForm's live inline
+                                            parse+bind diagnostic preview
+                                            (never authoritative — the real
+                                            evaluation happens again in
+                                            steps/customColumn.ts)
+
+domain/notebook.ts                 TestCell.modelId: string → TestCell.scope:
+                                       TestCellScope = { kind: 'model';
+                                       modelId } | { kind: 'workspace' } — a
+                                       full breaking migration with no
+                                       compat shim (no persistence schema-
+                                       versioning exists anywhere in this
+                                       codebase; a local dev tool, no
+                                       deployed users) — see
+                                       docs/VALIDATION_ENGINE.md "TestCell
+                                       scope"
+domain/validation.ts               + QuerySelector/QueryColumnSelector + 6
+                                       new ValidationRuleType members/
+                                       interfaces (docs/QUERY_VALIDATION.md)
+runtime/validation/validationEngine.ts   ValidationSnapshot + queries/
+                                            queryEvaluations; evaluateRule()
+                                            dispatches the 8 pre-existing
+                                            rule types through a
+                                            `model ? evaluateX(...) :
+                                            modelConfigError(rule)` ternary
+                                            (zero changes to the 5 existing
+                                            per-rule evaluator files) and the
+                                            6 new query rule types to
+                                            queryValidation.ts, which never
+                                            receives `model` at all
+runtime/validation/selectorResolver.ts   + resolveQuerySelector/
+                                            resolveQueryColumnSelector/
+                                            classifyQuerySelectorFailure —
+                                            deliberately separate from
+                                            classifySelectorFailure: a
+                                            missing query-output column is
+                                            'failed', not 'error' (docs/
+                                            QUERY_VALIDATION.md)
+runtime/validation/fingerprint.ts    computeValidationFingerprint(snapshot,
+                                        testCell) (was (model, datasets,
+                                        spec)); model payload only computed
+                                        for scope.kind === 'model'; +
+                                        referencedQuerySelectors(spec) folds
+                                        in every referenced query's own
+                                        queryFingerprint.ts-computed
+                                        fingerprint — zero new query-side
+                                        fingerprint logic needed
+runtime/notebook/notebookRuntime.ts   createTestCell(scope, validation,
+                                         title?, prompt?) (was
+                                         (modelId, ...))
+components/notebook/
+  AddTestCellPanel.tsx, TestCellCard.tsx, NotebookCell.tsx   updated for
+                                                                `scope`;
+                                                                TestCellCard's
+                                                                missing-model
+                                                                placeholder
+                                                                now guards on
+                                                                `scope.kind
+                                                                === 'model'`
+                                                                (a real bug
+                                                                found during
+                                                                browser
+                                                                verification
+                                                                — it
+                                                                previously
+                                                                showed for
+                                                                every
+                                                                workspace-
+                                                                scoped
+                                                                checkpoint)
+data/lessons/{retailFoundations,filterContext,timeIntelligence}Lesson.ts
+                                    pass { kind: 'model', modelId: ... }
+
+runtime/learning/lessonProgress.ts   isLessonComplete(stages,
+                                        runsByValidationId,
+                                        staleByValidationId) (was (stages,
+                                        run, isStale)) — every checkpoint
+                                        stage's own map entry must satisfy
+                                        isStageComplete (unchanged per-stage
+                                        logic); createLessonAttemptFromValidationRun
+                                        renamed createLessonAttemptFromCheckpointRuns
+                                        (sums points/passed across every
+                                        checkpoint run, one composite
+                                        fingerprint hashed over every run's
+                                        own {testCellId, fingerprint})
+runtime/learning/useLessonWorkspace.ts   singular checkpointStage/
+                                            checkpointTestCell/checkpointRun/
+                                            checkpointStale → per-checkpoint
+                                            Record<validationId, ...> maps;
+                                            checkCheckpoint(stageId) (was
+                                            zero-arg) checks exactly the one
+                                            checkpoint belonging to that
+                                            stage; a LessonAttempt is
+                                            recorded only on the exact check
+                                            that flips wasComplete→
+                                            isCompleteNow, computed
+                                            synchronously from the pre-/
+                                            post-update run maps
+components/learning/LessonWorkspace.tsx   reads the current stage's own
+                                             checkpoint run/stale from the
+                                             maps; + handleRunValidation(cellId)
+                                             routing a TestCellCard's "Run"
+                                             click to the stage that owns
+                                             that cell's validation.id
+data/lessons/lessonRegistry.ts       + powerQueryLesson (4th built-in lesson)
+```
+
+`SemanticModel`, `CalculatedColumn`, `Measure`, every `expression/*` file
+(the DAX engine), and every `runtime/measure/*`/`runtime/dateTable/*`/
+`runtime/context/*`/`runtime/visual/*` file are **untouched** — proof that
+Direct Query Validation and the new Applied Step kinds stayed inside the
+Power Query/Validation boundary rather than growing a second path through
+the model layer. See
+[`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md),
+[`docs/APPLIED_STEPS.md`](./docs/APPLIED_STEPS.md),
+[`docs/POWER_QUERY_EXPRESSIONS.md`](./docs/POWER_QUERY_EXPRESSIONS.md),
+[`docs/QUERY_VALIDATION.md`](./docs/QUERY_VALIDATION.md) and
+[`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md) for the full design.
+
 ## Expression strategy
 
 Do not implement full DAX.

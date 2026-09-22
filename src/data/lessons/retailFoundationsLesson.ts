@@ -5,7 +5,7 @@ import { buildRetailNotebookBase, createLessonRuntime } from './support/retailMo
 function initialize(): LessonInitialState {
   const runtime = createLessonRuntime('Retail Foundations')
   const base = buildRetailNotebookBase(runtime)
-  runtime.createTestCell(base.modelId, retailFoundationsValidationSpec, 'Retail Foundations Checkpoint')
+  runtime.createTestCell({ kind: 'model', modelId: base.modelId }, retailFoundationsValidationSpec, 'Retail Foundations Checkpoint')
 
   const snapshot = runtime.getSnapshot()
   return { notebook: snapshot.notebook, datasets: snapshot.datasets, models: snapshot.models, queries: snapshot.queries }

@@ -1,9 +1,11 @@
 import type { Dataset } from '../../domain/data'
 import type { CalculatedColumn, Measure, ModelTable, SemanticModel } from '../../domain/model'
-import type { CalculatedColumnSelector, ColumnSelector, MeasureSelector, TableSelector } from '../../domain/validation'
+import type { QueryDefinition, QueryEvaluation } from '../../domain/query'
+import type { CalculatedColumnSelector, ColumnSelector, MeasureSelector, QueryColumnSelector, QuerySelector, TableSelector } from '../../domain/validation'
+import { primaryTable } from '../../domain/data'
 import { resolveTableRef } from '../model/modelRuntime'
 
-export type SelectorTargetKind = 'table' | 'column' | 'measure' | 'calculated-column'
+export type SelectorTargetKind = 'table' | 'column' | 'measure' | 'calculated-column' | 'query' | 'query-column'
 export type SelectorResolutionErrorCode = 'VALIDATION_TARGET_NOT_FOUND' | 'VALIDATION_TARGET_AMBIGUOUS'
 
 export interface SelectorResolutionError {
@@ -195,4 +197,70 @@ export function resolveCalculatedColumnSelector(
     )
   }
   return ok(matches[0])
+}
+
+/**
+ * Whether a query-selector resolution failure is "the learner hasn't built
+ * this yet" (a normal failed outcome) or a genuine configuration error.
+ * Unlike `classifySelectorFailure`, a missing *query-output column* is
+ * still `'failed'`, not `'error'` — a query's output column is exactly the
+ * thing a Power Query exercise expects the learner to produce (e.g. via a
+ * Custom Column or a rename), so it behaves like a missing table/measure,
+ * not like a missing model column (docs/QUERY_VALIDATION.md "QuerySelector
+ * failure semantics").
+ */
+export function classifyQuerySelectorFailure(error: SelectorResolutionError): 'failed' | 'error' {
+  if (error.code === 'VALIDATION_TARGET_AMBIGUOUS') return 'error'
+  return 'failed'
+}
+
+/** Resolves a `QuerySelector` to a `QueryDefinition` by author-facing name (case-insensitive) — the query counterpart to `resolveTableSelector`. */
+export function resolveQuerySelector(queries: Record<string, QueryDefinition>, selector: QuerySelector): SelectorResolution<QueryDefinition> {
+  const lower = selector.queryName.toLowerCase()
+  const matches = Object.values(queries).filter((q) => q.name.toLowerCase() === lower)
+
+  if (matches.length === 0) {
+    return fail('query', 'VALIDATION_TARGET_NOT_FOUND', `Expected a query named "${selector.queryName}".`, { selector })
+  }
+  if (matches.length > 1) {
+    return fail('query', 'VALIDATION_TARGET_AMBIGUOUS', `More than one query named "${selector.queryName}" exists.`, { selector, matchCount: matches.length })
+  }
+  return ok(matches[0])
+}
+
+export interface ResolvedQueryColumn {
+  query: QueryDefinition
+  columnId: string
+  columnName: string
+}
+
+/** Resolves a `QueryColumnSelector` against the query's *evaluated output* — never the query definition's own steps, since a column can only be asserted to exist once the pipeline has actually produced it. */
+export function resolveQueryColumnSelector(
+  queries: Record<string, QueryDefinition>,
+  queryEvaluations: Record<string, QueryEvaluation>,
+  selector: QueryColumnSelector,
+): SelectorResolution<ResolvedQueryColumn> {
+  const queryResolution = resolveQuerySelector(queries, selector.query)
+  if (!queryResolution.ok) return queryResolution
+
+  const query = queryResolution.value
+  const evaluation = queryEvaluations[query.id]
+  const table = evaluation?.output ? primaryTable(evaluation.output) : undefined
+  if (!table) {
+    return fail('query-column', 'VALIDATION_TARGET_NOT_FOUND', `"${query.name}" has no output yet — it hasn't successfully evaluated.`, { selector })
+  }
+
+  const lower = selector.columnName.toLowerCase()
+  const matches = table.columns.filter((c) => c.name.toLowerCase() === lower)
+
+  if (matches.length === 0) {
+    return fail('query-column', 'VALIDATION_TARGET_NOT_FOUND', `"${query.name}" has no column named "${selector.columnName}" yet.`, { selector })
+  }
+  if (matches.length > 1) {
+    return fail('query-column', 'VALIDATION_TARGET_AMBIGUOUS', `"${query.name}" has more than one column named "${selector.columnName}".`, {
+      selector,
+      matchCount: matches.length,
+    })
+  }
+  return ok({ query, columnId: matches[0].id, columnName: matches[0].name })
 }

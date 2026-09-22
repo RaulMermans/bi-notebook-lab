@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { Dataset } from '../../../src/domain/data'
+import type { LessonStage } from '../../../src/domain/learning'
 import type { TestCell } from '../../../src/domain/notebook'
+import type { ValidationRun } from '../../../src/domain/validation'
 import { filterContextLesson } from '../../../src/data/lessons/filterContextLesson'
 import { retailFoundationsLesson } from '../../../src/data/lessons/retailFoundationsLesson'
 import { timeIntelligenceLesson } from '../../../src/data/lessons/timeIntelligenceLesson'
@@ -14,6 +16,17 @@ function findColumnId(dataset: Dataset, name: string): string {
 
 function findDataset(datasets: Record<string, Dataset>, name: string): Dataset {
   return Object.values(datasets).find((d) => d.name === name)!
+}
+
+function modelIdOf(testCell: TestCell): string {
+  if (testCell.scope.kind !== 'model') throw new Error('expected a model-scoped TestCell')
+  return testCell.scope.modelId
+}
+
+/** These lessons define exactly one checkpoint stage, so `isLessonComplete` needs a single-entry map keyed by that stage's `checkpointValidationId`. */
+function singleCheckpointComplete(stages: LessonStage[], run: ValidationRun, isStale: boolean): boolean {
+  const validationId = stages.find((s) => s.checkpointValidationId)!.checkpointValidationId!
+  return isLessonComplete(stages, { [validationId]: run }, { [validationId]: isStale })
 }
 
 /**
@@ -31,11 +44,11 @@ describe('Retail Foundations lesson integration', () => {
     const state = retailFoundationsLesson.initialize()
     const runtime = new NotebookRuntime({ notebook: state.notebook, datasets: state.datasets, models: state.models, queries: {}, queryEvaluations: {} })
     const testCell = state.notebook.cells.find((cell): cell is TestCell => cell.kind === 'test')!
-    const modelId = testCell.modelId
+    const modelId = modelIdOf(testCell)
 
-    const partialRun = runValidation({ datasets: runtime.getSnapshot().datasets, models: runtime.getSnapshot().models }, testCell)
+    const partialRun = runValidation({ datasets: runtime.getSnapshot().datasets, models: runtime.getSnapshot().models, queries: {}, queryEvaluations: {} }, testCell)
     expect(partialRun.passed).toBe(false)
-    expect(isLessonComplete(retailFoundationsLesson.definition.stages, partialRun, false)).toBe(false)
+    expect(singleCheckpointComplete(retailFoundationsLesson.definition.stages, partialRun, false)).toBe(false)
 
     const customersDs = findDataset(state.datasets, 'Customers')
     const productsDs = findDataset(state.datasets, 'Products')
@@ -77,10 +90,10 @@ describe('Retail Foundations lesson integration', () => {
     }
 
     const finalSnapshot = runtime.getSnapshot()
-    const finalRun = runValidation({ datasets: finalSnapshot.datasets, models: finalSnapshot.models }, testCell)
+    const finalRun = runValidation({ datasets: finalSnapshot.datasets, models: finalSnapshot.models, queries: {}, queryEvaluations: {} }, testCell)
     expect(finalRun.passed).toBe(true)
     expect(finalRun.percentage).toBe(100)
-    expect(isLessonComplete(retailFoundationsLesson.definition.stages, finalRun, false)).toBe(true)
+    expect(singleCheckpointComplete(retailFoundationsLesson.definition.stages, finalRun, false)).toBe(true)
   })
 })
 
@@ -89,9 +102,9 @@ describe('Filter Context & CALCULATE lesson integration', () => {
     const state = filterContextLesson.initialize()
     const runtime = new NotebookRuntime({ notebook: state.notebook, datasets: state.datasets, models: state.models, queries: {}, queryEvaluations: {} })
     const testCell = state.notebook.cells.find((cell): cell is TestCell => cell.kind === 'test')!
-    const modelId = testCell.modelId
+    const modelId = modelIdOf(testCell)
 
-    const partialRun = runValidation({ datasets: state.datasets, models: state.models }, testCell)
+    const partialRun = runValidation({ datasets: state.datasets, models: state.models, queries: {}, queryEvaluations: {} }, testCell)
     expect(partialRun.passed).toBe(false)
 
     const model = runtime.getModel(modelId)!
@@ -109,11 +122,11 @@ describe('Filter Context & CALCULATE lesson integration', () => {
     }
 
     const finalSnapshot = runtime.getSnapshot()
-    const finalRun = runValidation({ datasets: finalSnapshot.datasets, models: finalSnapshot.models }, testCell)
+    const finalRun = runValidation({ datasets: finalSnapshot.datasets, models: finalSnapshot.models, queries: {}, queryEvaluations: {} }, testCell)
     expect(finalRun.ruleResults.filter((r) => r.status !== 'passed')).toEqual([])
     expect(finalRun.passed).toBe(true)
     expect(finalRun.percentage).toBe(100)
-    expect(isLessonComplete(filterContextLesson.definition.stages, finalRun, false)).toBe(true)
+    expect(singleCheckpointComplete(filterContextLesson.definition.stages, finalRun, false)).toBe(true)
   })
 })
 
@@ -122,9 +135,9 @@ describe('Time Intelligence lesson integration', () => {
     const state = timeIntelligenceLesson.initialize()
     const runtime = new NotebookRuntime({ notebook: state.notebook, datasets: state.datasets, models: state.models, queries: {}, queryEvaluations: {} })
     const testCell = state.notebook.cells.find((cell): cell is TestCell => cell.kind === 'test')!
-    const modelId = testCell.modelId
+    const modelId = modelIdOf(testCell)
 
-    const partialRun = runValidation({ datasets: state.datasets, models: state.models }, testCell)
+    const partialRun = runValidation({ datasets: state.datasets, models: state.models, queries: {}, queryEvaluations: {} }, testCell)
     expect(partialRun.passed).toBe(false)
 
     const model = runtime.getModel(modelId)!
@@ -142,10 +155,10 @@ describe('Time Intelligence lesson integration', () => {
     }
 
     const finalSnapshot = runtime.getSnapshot()
-    const finalRun = runValidation({ datasets: finalSnapshot.datasets, models: finalSnapshot.models }, testCell)
+    const finalRun = runValidation({ datasets: finalSnapshot.datasets, models: finalSnapshot.models, queries: {}, queryEvaluations: {} }, testCell)
     expect(finalRun.ruleResults.filter((r) => r.status !== 'passed')).toEqual([])
     expect(finalRun.passed).toBe(true)
     expect(finalRun.percentage).toBe(100)
-    expect(isLessonComplete(timeIntelligenceLesson.definition.stages, finalRun, false)).toBe(true)
+    expect(singleCheckpointComplete(timeIntelligenceLesson.definition.stages, finalRun, false)).toBe(true)
   })
 })

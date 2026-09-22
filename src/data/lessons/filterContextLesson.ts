@@ -7,7 +7,7 @@ function initialize(): LessonInitialState {
   const base = buildRetailNotebookBase(runtime)
   connectRetailStarSchema(runtime, base)
   addRetailFoundationsSolution(runtime, base)
-  runtime.createTestCell(base.modelId, filterContextValidationSpec, 'Filter Context Checkpoint')
+  runtime.createTestCell({ kind: 'model', modelId: base.modelId }, filterContextValidationSpec, 'Filter Context Checkpoint')
 
   const snapshot = runtime.getSnapshot()
   return { notebook: snapshot.notebook, datasets: snapshot.datasets, models: snapshot.models, queries: snapshot.queries }

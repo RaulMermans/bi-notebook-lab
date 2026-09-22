@@ -66,16 +66,18 @@ describe('Validation staleness after a Power Query row-only edit (brief §106, m
         },
       ],
     }
-    const cell: TestCell = { id: 'test-1', kind: 'test', title: 'Checkpoint', modelId: model.id, validation: spec }
+    const cell: TestCell = { id: 'test-1', kind: 'test', title: 'Checkpoint', scope: { kind: 'model', modelId: model.id }, validation: spec }
 
-    const run = runValidation({ datasets: runtime.getSnapshot().datasets, models: { [model.id]: model } }, cell)
+    const snapshotBefore = { datasets: runtime.getSnapshot().datasets, models: { [model.id]: model }, queries: runtime.getSnapshot().queries, queryEvaluations: runtime.getSnapshot().queryEvaluations }
+    const run = runValidation(snapshotBefore, cell)
     expect(run.passed).toBe(true)
-    expect(isValidationRunStale(run, model, runtime.getSnapshot().datasets, spec)).toBe(false)
+    expect(isValidationRunStale(run, snapshotBefore, cell)).toBe(false)
 
     // Edit ONLY the Power Query filter threshold — no schema change at all.
     const filterStepId = runtime.getQuery(query.id)!.steps[0].id
     runtime.updateQueryStep(query.id, filterStepId, { conditions: [{ columnId: 'sales-revenue', operator: 'greater-than', value: 500 }] })
 
-    expect(isValidationRunStale(run, model, runtime.getSnapshot().datasets, spec)).toBe(true)
+    const snapshotAfter = { datasets: runtime.getSnapshot().datasets, models: { [model.id]: model }, queries: runtime.getSnapshot().queries, queryEvaluations: runtime.getSnapshot().queryEvaluations }
+    expect(isValidationRunStale(run, snapshotAfter, cell)).toBe(true)
   })
 })

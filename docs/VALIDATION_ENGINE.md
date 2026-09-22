@@ -5,6 +5,11 @@ layer that grades a learner's real model/columns/measures against an authored
 `ValidationSpec`, using the exact same runtimes built in Sprints 1–4. It never
 compares expression source text, and it never reimplements BI semantics.
 
+Sprint 14 generalizes the same engine to grade a Power Query output
+directly, with no model involved at all — see "TestCell scope" below and
+[`docs/QUERY_VALIDATION.md`](./QUERY_VALIDATION.md) for that rule set's full
+reference.
+
 ## Philosophy
 
 > Validation should test semantics, not exact text. (`PRODUCT.md`)
@@ -27,6 +32,50 @@ Partial score + specific feedback
 same correct result under the same fixtures both pass. Source-string
 comparison never appears anywhere in this layer (see "No independent
 calculation oracle" below).
+
+## TestCell scope (Sprint 14)
+
+Through Sprint 13, a `TestCell` always graded one `SemanticModel` —
+`modelId: string` was required. Sprint 14 generalizes this to
+`scope: TestCellScope`:
+
+```ts
+type TestCellScope = { kind: 'model'; modelId: string } | { kind: 'workspace' }
+```
+
+`{ kind: 'model' }` behaves exactly as `modelId` always did. `{ kind:
+'workspace' }` is new: a checkpoint with no model at all, whose rules grade
+Power Query state directly (see
+[`docs/QUERY_VALIDATION.md`](./QUERY_VALIDATION.md)) rather than something
+registered on a `SemanticModel`. This was a full breaking migration with no
+compatibility shim — there is no persistence schema-versioning anywhere in
+this codebase (`NotebookDocument`/`TestCell` have always persisted as raw
+JSON with no migration layer), and this is a local dev tool with no
+deployed users yet, so every construction site (the built-in lessons,
+`AddTestCellPanel.tsx`, `notebookRuntime.ts#createTestCell`) was updated in
+place rather than kept backward-compatible.
+
+`runValidation(snapshot, testCell)` resolves `model = scope.kind === 'model'
+? snapshot.models[scope.modelId] : undefined`, and the pre-existing
+`VALIDATION_CONFIG_ERROR` short-circuit (every rule reported as `'error'`
+because the checkpoint's own model is missing) only fires when `scope.kind
+=== 'model'` and that model can't be found — a workspace-scoped checkpoint
+is never blocked on a model that was never supposed to exist.
+`evaluateRule(rule, model, snapshot)` then dispatches each of the 8
+pre-Sprint-14 rule types through a `model ? evaluateX(...) :
+modelConfigError(rule)` ternary — meaning **none of the five existing
+per-rule evaluator files needed a single line changed**; the
+`undefined`-model guard lives entirely in this one dispatch function, not
+scattered through every evaluator. The 6 new `query-*` rule types
+(`runtime/validation/queryValidation.ts`) dispatch unconditionally and never
+receive `model` at all — they only ever read `snapshot.queries`/
+`snapshot.queryEvaluations`.
+
+`AddTestCellPanel.tsx` still only creates `{ kind: 'model' }` cells in the
+Free Lab — there is no workspace-scope authoring UI there yet, consistent
+with "no exercise-authoring UI" being known Sprint 5-era scope. Every
+workspace-scoped `TestCell` today is created programmatically by a lesson's
+`initialize()` (see [`docs/LEARNING_SYSTEM.md`](./LEARNING_SYSTEM.md)).
 
 ## Author selectors vs. runtime ids
 
@@ -104,7 +153,11 @@ interface BaseValidationRule {
 }
 ```
 
-Six rule types:
+Six rule types shipped in Sprint 5 (a `relationship-config` type was added in
+Sprint 11, a `date-table` type in Sprint 10 — see their addenda below — and
+six more `query-*` types were added in Sprint 14, documented separately in
+[`docs/QUERY_VALIDATION.md`](./QUERY_VALIDATION.md) since they're a
+self-contained rule family with their own selector type):
 
 | type | checks | reuses |
 |---|---|---|
@@ -317,9 +370,15 @@ exactly which failures become `'error'` vs. a normal `'failed'`.
 ## Staleness / fingerprint (`fingerprint.ts`)
 
 ```ts
-computeValidationFingerprint(model, datasets, spec): string   // FNV-1a hash
-isValidationRunStale(run, model, datasets, spec): boolean
+computeValidationFingerprint(snapshot, testCell): string   // FNV-1a hash
+isValidationRunStale(run, snapshot, testCell): boolean
 ```
+
+(Sprint 14: both functions take the full `ValidationSnapshot` + `TestCell`
+instead of `(model, datasets, spec)` directly, so they can resolve `scope`
+themselves and fold in query fingerprints — see "TestCell scope" above and
+the Sprint 14 addendum below. Behavior for a model-scoped `TestCell` is
+unchanged.)
 
 The fingerprint is computed over exactly the semantic inputs a run depends
 on: each `ModelTable`'s resolved name + column names/types, every
@@ -347,11 +406,23 @@ stale PASS would keep showing as current. See
 and `tests/runtime/validation/queryValidationStaleness.test.ts` for the
 mandatory PASS→STALE proof.
 
+**Sprint 14 addition**: for a Direct Query Validation checkpoint (any rule
+with a `.query` selector, model-scoped or workspace-scoped), a new
+`referencedQuerySelectors(spec)` walks every rule for its `QuerySelector`
+and folds in that query's own `queryFingerprint.ts` fingerprint directly —
+not through a `Dataset.source.revision` indirection, since a
+workspace-scoped checkpoint has no `ModelTable` to carry one. This needed
+zero new query-fingerprint logic: the existing fingerprint already excludes
+step display name/UI state and already changes on any semantic edit (filter
+threshold, Custom Column expression, Pivot config, an upstream dependency).
+See [`docs/QUERY_VALIDATION.md`](./QUERY_VALIDATION.md) "Fingerprint /
+staleness" for the full picture.
+
 ## Persistence boundaries
 
 ```text
 Persisted (inside TestCell, via the existing notebook document store):
-  modelId
+  scope (Sprint 14: { kind: 'model'; modelId } | { kind: 'workspace' } — was modelId: string)
   ValidationSpec (rules, selectors, expected values, tolerances)
 
 Never persisted:
@@ -500,13 +571,8 @@ now).
   `ExpressionSemanticAssertion` the same way.
 - No historical progress or attempt tracking — `ValidationRun` is always the
   current-state score only (ROADMAP.md Phase 8).
-- No `'query-result'` rule type (row count / column presence-and-type /
-  specific row value on a query's output) — the Sprint 12 brief called this
-  out as optional ("do NOT build a full Power Query course yet"), and the
-  existing `table-present`/`calculated-column-result`/`measure-result` rules
-  already grade a query's output indirectly once it's registered on a
-  model (a query-sourced `ModelTable` is validated exactly like a raw one).
-  A dedicated `query-result` rule — with its own `QuerySelector { queryName
-  }` author-selector, mirroring `TableSelector` — is a natural next step for
-  a future Power Query practice checkpoint (ROADMAP.md "Later, only if
-  validated").
+- Direct Query Validation (Sprint 14) is delivered — see
+  [`docs/QUERY_VALIDATION.md`](./QUERY_VALIDATION.md) for its own known
+  limitations (e.g. no assertion over a query's *row-level* diagnostics
+  beyond error/no-error, no cross-query join assertion beyond what
+  `query-step-semantics`'s `uses-step('merge-queries')` can already express).

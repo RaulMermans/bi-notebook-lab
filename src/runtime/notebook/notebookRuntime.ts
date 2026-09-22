@@ -1,4 +1,4 @@
-import type { CalculatedColumnCell, GenericNotebookCell, MeasureCell, ModelCell, NotebookCell, NotebookDocument, QueryCell, TestCell, VisualCell } from '../../domain/notebook'
+import type { CalculatedColumnCell, GenericNotebookCell, MeasureCell, ModelCell, NotebookCell, NotebookDocument, QueryCell, TestCell, TestCellScope, VisualCell } from '../../domain/notebook'
 import { DATA_LIMITS, type Dataset } from '../../domain/data'
 import type { CalculatedColumn, ColumnRef, Measure, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
 import type { QueryDefinition } from '../../domain/query'
@@ -532,18 +532,19 @@ export class NotebookRuntime {
   }
 
   /**
-   * Appends a `TestCell` referencing an existing model and a `ValidationSpec`
-   * — there is no exercise-authoring UI yet (Sprint 5 brief §35), so this is
-   * currently only used by the built-in "+ Add Retail checkpoint" action.
-   * Unlike calculated columns/measures there is no validation step: a
-   * `ValidationSpec` is just data, so any spec can be attached to any model.
+   * Appends a `TestCell` scoped to either an existing model or the whole
+   * workspace (Sprint 14 `TestCellScope`) with a `ValidationSpec` — there is
+   * no exercise-authoring UI yet (Sprint 5 brief §35), so this is currently
+   * only used by built-in checkpoint actions. Unlike calculated
+   * columns/measures there is no validation step: a `ValidationSpec` is just
+   * data, so any spec can be attached to any scope.
    */
-  createTestCell(modelId: string, validation: ValidationSpec, title?: string, prompt?: string): TestCell {
+  createTestCell(scope: TestCellScope, validation: ValidationSpec, title?: string, prompt?: string): TestCell {
     const cell: TestCell = {
       id: generateId('cell'),
       kind: 'test',
       title: title ?? validation.title,
-      modelId,
+      scope,
       prompt,
       validation,
       status: 'idle',

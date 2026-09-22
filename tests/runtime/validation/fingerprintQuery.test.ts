@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Dataset } from '../../../src/domain/data'
 import type { SemanticModel } from '../../../src/domain/model'
+import type { TestCell } from '../../../src/domain/notebook'
 import type { ValidationSpec } from '../../../src/domain/validation'
 import { computeValidationFingerprint } from '../../../src/runtime/validation/fingerprint'
 
@@ -38,17 +39,22 @@ function model(): SemanticModel {
 }
 
 const spec: ValidationSpec = { id: 'spec-1', title: 'Check', passingPercentage: 100, rules: [] }
+const cell: TestCell = { id: 'cell-1', kind: 'test', title: 'Check', scope: { kind: 'model', modelId: 'model-1' }, validation: spec }
+
+function snapshotFor(datasets: Record<string, Dataset>) {
+  return { models: { 'model-1': model() }, datasets, queries: {}, queryEvaluations: {} }
+}
 
 describe('computeValidationFingerprint with a query-sourced table', () => {
   it('changes when the query revision changes, even though schema is identical', () => {
-    const before = computeValidationFingerprint(model(), { 'query-out-ds': queryDataset('rev-1') }, spec)
-    const after = computeValidationFingerprint(model(), { 'query-out-ds': queryDataset('rev-2') }, spec)
+    const before = computeValidationFingerprint(snapshotFor({ 'query-out-ds': queryDataset('rev-1') }), cell)
+    const after = computeValidationFingerprint(snapshotFor({ 'query-out-ds': queryDataset('rev-2') }), cell)
     expect(before).not.toBe(after)
   })
 
   it('is stable when the revision is unchanged', () => {
-    const a = computeValidationFingerprint(model(), { 'query-out-ds': queryDataset('rev-1') }, spec)
-    const b = computeValidationFingerprint(model(), { 'query-out-ds': queryDataset('rev-1') }, spec)
+    const a = computeValidationFingerprint(snapshotFor({ 'query-out-ds': queryDataset('rev-1') }), cell)
+    const b = computeValidationFingerprint(snapshotFor({ 'query-out-ds': queryDataset('rev-1') }), cell)
     expect(a).toBe(b)
   })
 })

@@ -53,8 +53,8 @@ function LessonWorkspaceInner({ lesson, onExit, onRestart }: LessonWorkspaceProp
     progress,
     stageCompletion,
     lessonComplete,
-    checkpointRun,
-    checkpointStale,
+    checkpointRunsByValidationId,
+    checkpointStaleByValidationId,
     validationRuns,
     actions,
   } = useLessonWorkspace(lesson)
@@ -74,6 +74,14 @@ function LessonWorkspaceInner({ lesson, onExit, onRestart }: LessonWorkspaceProp
     visualContext.setSlicerFilter(cellId, buildSlicerFilter(cell.visual.column, values, cell.visual.mode))
   }
 
+  /** Routes a "Run" click on a specific `TestCellCard` to the lesson stage whose checkpoint it belongs to — needed once a lesson can have more than one checkpoint TestCell in its notebook. */
+  function handleRunValidation(cellId: string) {
+    const cell = notebook.cells.find((c) => c.id === cellId)
+    if (!cell || cell.kind !== 'test') return
+    const stage = definition.stages.find((s) => s.checkpointValidationId === cell.validation.id)
+    if (stage) actions.checkCheckpoint(stage.id)
+  }
+
   const testCells = useMemo(
     () => notebook.cells.filter((cell): cell is Extract<NotebookCellModel, { kind: 'test' }> => cell.kind === 'test'),
     [notebook.cells],
@@ -86,15 +94,14 @@ function LessonWorkspaceInner({ lesson, onExit, onRestart }: LessonWorkspaceProp
     for (const cell of testCells) {
       const run = validationRuns[cell.id]
       if (!run) continue
-      const model = models[cell.modelId]
-      if (model && !isValidationRunStale(run, model, datasets, cell.validation)) {
+      if (!isValidationRunStale(run, { models, datasets, queries, queryEvaluations }, cell)) {
         current[cell.id] = run
       } else {
         stale.add(cell.id)
       }
     }
     return { currentRuns: current, staleTestCellIds: stale }
-  }, [testCells, validationRuns, models, datasets])
+  }, [testCells, validationRuns, models, datasets, queries, queryEvaluations])
 
   const currentStageId = session?.currentStageId ?? definition.stages[0]?.id
   const currentStage: LessonStage | undefined = definition.stages.find((stage) => stage.id === currentStageId) ?? definition.stages[0]
@@ -109,6 +116,8 @@ function LessonWorkspaceInner({ lesson, onExit, onRestart }: LessonWorkspaceProp
   const hasMoreHints = currentStage ? (currentStage.hints?.length ?? 0) > revealedHintsForStage.length : false
 
   const isCheckpointStage = Boolean(currentStage?.checkpointValidationId)
+  const checkpointRun = currentStage?.checkpointValidationId ? checkpointRunsByValidationId[currentStage.checkpointValidationId] : undefined
+  const checkpointStale = currentStage?.checkpointValidationId ? (checkpointStaleByValidationId[currentStage.checkpointValidationId] ?? true) : true
 
   async function handleRestart(kind: 'reset' | 'new-attempt') {
     if (kind === 'reset') await actions.resetLesson()
@@ -189,8 +198,8 @@ function LessonWorkspaceInner({ lesson, onExit, onRestart }: LessonWorkspaceProp
             </button>
           )}
 
-          {isCheckpointStage && (
-            <button type="button" className="primary-button" onClick={() => actions.checkCheckpoint()}>
+          {isCheckpointStage && currentStage && (
+            <button type="button" className="primary-button" onClick={() => actions.checkCheckpoint(currentStage.id)}>
               Check progress
             </button>
           )}
@@ -265,7 +274,7 @@ function LessonWorkspaceInner({ lesson, onExit, onRestart }: LessonWorkspaceProp
         actions={notebookActions}
         currentValidationRuns={currentRuns}
         staleTestCellIds={staleTestCellIds}
-        onRunValidation={() => actions.checkCheckpoint()}
+        onRunValidation={handleRunValidation}
         notebookVisualContext={visualContext.filterContext}
         slicerSelections={slicerSelections}
         onSlicerChange={handleSlicerChange}

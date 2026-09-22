@@ -2,8 +2,10 @@ import type {
   AppendColumnMapping,
   ColumnRename,
   ColumnTypeChange,
+  ConditionalColumnClause,
   GroupByAggregationFunction,
   MergeJoinKind,
+  PivotAggregationFunction,
   QueryFilterCondition,
   QueryReplacement,
   QuerySortKey,
@@ -46,6 +48,11 @@ export type NewStepInput =
     }
   /** `columnNames` is the output schema's name list, already resolved by the caller (which can evaluate `sources` — see queryRuntime.ts). */
   | { kind: 'append-queries'; sources: QuerySource[]; columnNames: string[] }
+  | { kind: 'pivot-column'; pivotColumnId: string; valueColumnId: string; aggregation: PivotAggregationFunction }
+  | { kind: 'unpivot-columns'; mode: 'selected' | 'other-columns'; columnIds: string[]; attributeColumnName: string; valueColumnName: string }
+  | { kind: 'conditional-column'; outputName: string; clauses: ConditionalColumnClause[]; elseValue: unknown }
+  | { kind: 'index-column'; outputName: string; start: number; increment: number }
+  | { kind: 'custom-column'; outputName: string; expression: string }
 
 const DEFAULT_NAMES: Record<NewStepInput['kind'], string> = {
   'rename-columns': 'Renamed Columns',
@@ -62,6 +69,11 @@ const DEFAULT_NAMES: Record<NewStepInput['kind'], string> = {
   'group-by': 'Grouped Rows',
   'merge-queries': 'Merged Queries',
   'append-queries': 'Appended Queries',
+  'pivot-column': 'Pivoted Column',
+  'unpivot-columns': 'Unpivoted Columns',
+  'conditional-column': 'Conditional Column',
+  'index-column': 'Added Index',
+  'custom-column': 'Added Custom',
 }
 
 export function defaultStepName(input: NewStepInput): string {
@@ -143,5 +155,25 @@ export function buildStep(input: NewStepInput, name?: string): QueryStep {
       const columns: AppendColumnMapping[] = input.columnNames.map((columnName) => ({ name: columnName, outputColumnId: generateId('col') }))
       return { id, kind: 'append-queries', name: stepName, sources: input.sources, columns }
     }
+    case 'pivot-column':
+      return { id, kind: 'pivot-column', name: stepName, pivotColumnId: input.pivotColumnId, valueColumnId: input.valueColumnId, aggregation: input.aggregation }
+    case 'unpivot-columns':
+      return {
+        id,
+        kind: 'unpivot-columns',
+        name: stepName,
+        mode: input.mode,
+        columnIds: input.columnIds,
+        attributeColumnName: input.attributeColumnName,
+        attributeColumnId: generateId('col'),
+        valueColumnName: input.valueColumnName,
+        valueColumnId: generateId('col'),
+      }
+    case 'conditional-column':
+      return { id, kind: 'conditional-column', name: stepName, outputColumnId: generateId('col'), outputName: input.outputName, clauses: input.clauses, elseValue: input.elseValue }
+    case 'index-column':
+      return { id, kind: 'index-column', name: stepName, outputColumnId: generateId('col'), outputName: input.outputName, start: input.start, increment: input.increment }
+    case 'custom-column':
+      return { id, kind: 'custom-column', name: stepName, outputColumnId: generateId('col'), outputName: input.outputName, expression: input.expression }
   }
 }

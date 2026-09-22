@@ -60,4 +60,21 @@ describe('computeQueryFingerprint', () => {
     const b = computeQueryFingerprint(renamedQuery, {})
     expect(a).toBe(b)
   })
+
+  it('covers every Sprint 14 step kind generically — no special-casing needed for fingerprinting', () => {
+    const customStep: QueryStep = { id: 's3', kind: 'custom-column', name: 'Added Custom', outputColumnId: 'out1', outputName: 'Revenue', expression: '[Quantity] * [UnitPrice]' }
+    const a = computeQueryFingerprint(makeQuery([customStep]), {})
+    const editedExpression: QueryStep = { ...customStep, expression: '[Quantity] * [UnitPrice] * 2' }
+    const b = computeQueryFingerprint(makeQuery([editedExpression]), {})
+    expect(a).not.toBe(b)
+
+    const pivotStep: QueryStep = { id: 's4', kind: 'pivot-column', name: 'Pivoted Column', pivotColumnId: 'c1', valueColumnId: 'c2', aggregation: 'sum' }
+    const c = computeQueryFingerprint(makeQuery([pivotStep]), {})
+    const editedAggregation: QueryStep = { ...pivotStep, aggregation: 'count' }
+    const d = computeQueryFingerprint(makeQuery([editedAggregation]), {})
+    expect(c).not.toBe(d)
+
+    const renamedPivotStep: QueryStep = { ...pivotStep, name: 'My custom pivot label' }
+    expect(computeQueryFingerprint(makeQuery([renamedPivotStep]), {})).toBe(c)
+  })
 })

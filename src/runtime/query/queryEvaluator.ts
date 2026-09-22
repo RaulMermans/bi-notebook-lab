@@ -3,11 +3,15 @@ import { errorDiagnostic } from './queryDiagnostics'
 import type { QueryFrame } from './queryFrame'
 import { evaluateAppendQueries } from './steps/appendQueries'
 import { evaluateChangeType } from './steps/changeType'
+import { evaluateConditionalColumn } from './steps/conditionalColumn'
+import { evaluateCustomColumn } from './steps/customColumn'
 import { evaluateFill } from './steps/fill'
 import { evaluateFilterRows } from './steps/filterRows'
 import { evaluateGroupBy } from './steps/groupBy'
+import { evaluateIndexColumn } from './steps/indexColumn'
 import { evaluateMergeColumns } from './steps/mergeColumns'
 import { evaluateMergeQueries } from './steps/mergeQueries'
+import { evaluatePivotColumn } from './steps/pivotColumn'
 import { evaluateRemoveColumns } from './steps/removeColumns'
 import { evaluateRemoveDuplicates } from './steps/removeDuplicates'
 import { evaluateRenameColumns } from './steps/renameColumns'
@@ -15,6 +19,7 @@ import { evaluateReorderColumns } from './steps/reorderColumns'
 import { evaluateReplaceValues } from './steps/replaceValues'
 import { evaluateSortRows } from './steps/sortRows'
 import { evaluateSplitColumn } from './steps/splitColumn'
+import { evaluateUnpivotColumns } from './steps/unpivotColumns'
 import type { StepContext, StepEvalResult } from './stepContext'
 
 function runStep(frame: QueryFrame, step: QueryStep, context: StepContext): StepEvalResult {
@@ -47,6 +52,16 @@ function runStep(frame: QueryFrame, step: QueryStep, context: StepContext): Step
       return evaluateMergeQueries(frame, step, context)
     case 'append-queries':
       return evaluateAppendQueries(frame, step, context)
+    case 'pivot-column':
+      return evaluatePivotColumn(frame, step)
+    case 'unpivot-columns':
+      return evaluateUnpivotColumns(frame, step)
+    case 'conditional-column':
+      return evaluateConditionalColumn(frame, step)
+    case 'index-column':
+      return evaluateIndexColumn(frame, step)
+    case 'custom-column':
+      return evaluateCustomColumn(frame, step)
   }
 }
 

@@ -63,6 +63,17 @@ export interface MeasureCell extends BaseNotebookCell {
 }
 
 /**
+ * Sprint 14: what a `TestCell` grades. `'model'` behaves exactly like the
+ * Sprint 5-13 `modelId`-only contract. `'workspace'` is new — a checkpoint
+ * that only needs `datasets`/`queries`/`queryEvaluations` (e.g. a
+ * Power-Query-only exercise) and needs no Semantic Model to exist at all
+ * (docs/VALIDATION_ENGINE.md "TestCell scope"). A model-requiring rule
+ * evaluated against a `'workspace'`-scoped TestCell fails clearly with a
+ * config error rather than silently skipping.
+ */
+export type TestCellScope = { kind: 'model'; modelId: string } | { kind: 'workspace' }
+
+/**
  * Runs one or more validation assertions against current notebook state —
  * the Sprint 5 counterpart to `MeasureCell`/`CalculatedColumnCell`. Only
  * the `ValidationSpec` (rules, targets, expected outcomes) is persisted;
@@ -71,7 +82,7 @@ export interface MeasureCell extends BaseNotebookCell {
  */
 export interface TestCell extends BaseNotebookCell {
   kind: 'test'
-  modelId: string
+  scope: TestCellScope
   prompt?: string
   validation: ValidationSpec
 }

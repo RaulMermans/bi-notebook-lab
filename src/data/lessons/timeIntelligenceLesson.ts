@@ -14,7 +14,7 @@ function initialize(): LessonInitialState {
   connectRetailStarSchema(runtime, base)
   addRetailFoundationsSolution(runtime, base)
   markRetailCalendarDateTable(runtime, base)
-  runtime.createTestCell(base.modelId, timeIntelligenceValidationSpec, 'Time Intelligence Checkpoint')
+  runtime.createTestCell({ kind: 'model', modelId: base.modelId }, timeIntelligenceValidationSpec, 'Time Intelligence Checkpoint')
 
   const snapshot = runtime.getSnapshot()
   return { notebook: snapshot.notebook, datasets: snapshot.datasets, models: snapshot.models, queries: snapshot.queries }

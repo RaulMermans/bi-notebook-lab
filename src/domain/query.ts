@@ -176,6 +176,75 @@ export interface AppendQueriesStep extends BaseQueryStep {
   columns: AppendColumnMapping[]
 }
 
+export type PivotAggregationFunction = 'sum' | 'count' | 'min' | 'max' | 'first'
+
+/**
+ * Sprint 14. Output columns are data-dependent (one per distinct pivot
+ * value), so unlike every other schema-generating step this one does NOT
+ * store generated column ids on the step. Identity is instead a pure
+ * function of `(step.id, canonical pivot value)` computed at evaluation
+ * time — see `runtime/query/steps/pivotColumn.ts#pivotOutputColumnId` and
+ * docs/POWER_QUERY_RUNTIME.md "Pivot column identity". This still satisfies
+ * "same pivot value → same DataColumn.id" and "row order never changes
+ * identity", without needing an authoring-time round trip through preview
+ * data.
+ */
+export interface PivotColumnStep extends BaseQueryStep {
+  kind: 'pivot-column'
+  pivotColumnId: string
+  valueColumnId: string
+  aggregation: PivotAggregationFunction
+}
+
+export interface UnpivotColumnsStep extends BaseQueryStep {
+  kind: 'unpivot-columns'
+  /** 'selected' unpivots exactly `columnIds`; 'other-columns' unpivots every column NOT in `columnIds`. */
+  mode: 'selected' | 'other-columns'
+  columnIds: string[]
+  attributeColumnName: string
+  /** Generated once when the step is created — never regenerated during evaluation. */
+  attributeColumnId: string
+  valueColumnName: string
+  valueColumnId: string
+}
+
+export interface ConditionalColumnClause {
+  columnId: string
+  operator: QueryFilterOperator
+  /** Unused for `is-blank` / `is-not-blank`. */
+  value?: unknown
+  result: unknown
+}
+
+export interface ConditionalColumnStep extends BaseQueryStep {
+  kind: 'conditional-column'
+  outputColumnId: string
+  outputName: string
+  /** Evaluated in order; the first matching clause wins. */
+  clauses: ConditionalColumnClause[]
+  elseValue: unknown
+}
+
+export interface IndexColumnStep extends BaseQueryStep {
+  kind: 'index-column'
+  outputColumnId: string
+  outputName: string
+  start: number
+  increment: number
+}
+
+/**
+ * A deliberately bounded Power Query scalar-expression subset — not M (see
+ * docs/POWER_QUERY_EXPRESSIONS.md). `expression` is raw source text, parsed
+ * and bound fresh on every evaluation (cheap; avoids AST serialization).
+ */
+export interface CustomColumnStep extends BaseQueryStep {
+  kind: 'custom-column'
+  outputColumnId: string
+  outputName: string
+  expression: string
+}
+
 export type QueryStep =
   | RenameColumnsStep
   | RemoveColumnsStep
@@ -191,6 +260,11 @@ export type QueryStep =
   | GroupByStep
   | MergeQueriesStep
   | AppendQueriesStep
+  | PivotColumnStep
+  | UnpivotColumnsStep
+  | ConditionalColumnStep
+  | IndexColumnStep
+  | CustomColumnStep
 
 export type QueryStepKind = QueryStep['kind']
 
@@ -224,6 +298,16 @@ export type QueryDiagnosticCode =
   | 'QUERY_STEP_FAILED'
   | 'QUERY_NOT_LOADED'
   | 'QUERY_NO_COLUMNS'
+  | 'QUERY_PIVOT_VALUE_TYPE_INVALID'
+  | 'QUERY_PIVOT_AGGREGATION_INVALID'
+  | 'QUERY_PIVOT_SCHEMA_COLLISION'
+  | 'QUERY_UNPIVOT_COLUMN_NOT_FOUND'
+  | 'QUERY_CONDITIONAL_INVALID_RESULT_TYPE'
+  | 'QUERY_INDEX_INVALID_CONFIG'
+  | 'QUERY_CUSTOM_PARSE_ERROR'
+  | 'QUERY_CUSTOM_COLUMN_NOT_FOUND'
+  | 'QUERY_CUSTOM_TYPE_ERROR'
+  | 'QUERY_CUSTOM_DIVIDE_BY_ZERO'
 
 export interface QueryDiagnostic {
   severity: 'error' | 'warning' | 'info'

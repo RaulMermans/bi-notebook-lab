@@ -1,57 +1,8 @@
-import type { FilterRowsStep, QueryFilterCondition } from '../../../domain/query'
+import type { FilterRowsStep } from '../../../domain/query'
 import { errorDiagnostic } from '../queryDiagnostics'
 import type { QueryFrame } from '../queryFrame'
 import type { StepEvalResult } from '../stepContext'
-
-function isBlank(value: unknown): boolean {
-  return value === null || value === undefined || value === ''
-}
-
-function compare(value: unknown, target: unknown): number {
-  if (value instanceof Date || target instanceof Date) {
-    return new Date(value as string).getTime() - new Date(target as string).getTime()
-  }
-  if (typeof value === 'number' && typeof target === 'number') return value - target
-  return String(value).localeCompare(String(target))
-}
-
-function matchesCondition(row: Record<string, unknown>, columnName: string, condition: QueryFilterCondition): boolean {
-  const value = row[columnName]
-
-  switch (condition.operator) {
-    case 'is-blank':
-      return isBlank(value)
-    case 'is-not-blank':
-      return !isBlank(value)
-    default:
-      break
-  }
-
-  if (isBlank(value)) return false
-
-  switch (condition.operator) {
-    case 'equals':
-      return value === condition.value || compare(value, condition.value) === 0
-    case 'not-equals':
-      return !(value === condition.value || compare(value, condition.value) === 0)
-    case 'greater-than':
-      return compare(value, condition.value) > 0
-    case 'greater-than-or-equal':
-      return compare(value, condition.value) >= 0
-    case 'less-than':
-      return compare(value, condition.value) < 0
-    case 'less-than-or-equal':
-      return compare(value, condition.value) <= 0
-    case 'contains':
-      return String(value).toLowerCase().includes(String(condition.value).toLowerCase())
-    case 'starts-with':
-      return String(value).toLowerCase().startsWith(String(condition.value).toLowerCase())
-    case 'ends-with':
-      return String(value).toLowerCase().endsWith(String(condition.value).toLowerCase())
-    default:
-      return false
-  }
-}
+import { matchesCondition } from './scalarMatch'
 
 export function evaluateFilterRows(frame: QueryFrame, step: FilterRowsStep): StepEvalResult {
   if (step.conditions.length === 0) {

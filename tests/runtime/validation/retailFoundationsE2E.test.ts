@@ -8,7 +8,7 @@ import { runValidation } from '../../../src/runtime/validation/validationEngine'
 import { addRetailFoundationsSolution, buildRetailModel } from './helpers'
 
 function cellFor(modelId: string): TestCell {
-  return { id: 'checkpoint', kind: 'test', title: 'Retail Foundations', modelId, validation: retailFoundationsValidationSpec }
+  return { id: 'checkpoint', kind: 'test', title: 'Retail Foundations', scope: { kind: 'model', modelId }, validation: retailFoundationsValidationSpec }
 }
 
 function ruleById(run: ReturnType<typeof runValidation>, id: string) {
@@ -21,7 +21,7 @@ describe('Retail Foundations checkpoint (Sprint 5 end-to-end)', () => {
     const solved = addRetailFoundationsSolution(model, datasets, salesTableId)
     const cell = cellFor(solved.id)
 
-    const run = runValidation({ datasets, models: { [solved.id]: solved } }, cell)
+    const run = runValidation({ datasets, models: { [solved.id]: solved }, queries: {}, queryEvaluations: {} }, cell)
 
     expect(run.percentage).toBeCloseTo(100, 5)
     expect(run.pointsEarned).toBeCloseTo(100, 5)
@@ -37,7 +37,7 @@ describe('Retail Foundations checkpoint (Sprint 5 end-to-end)', () => {
     model = addTable(model, { datasetId: salesDs.id, tableId: salesDs.tables[0].id })
 
     const cell = cellFor(model.id)
-    const run = runValidation({ datasets, models: { [model.id]: model } }, cell)
+    const run = runValidation({ datasets, models: { [model.id]: model }, queries: {}, queryEvaluations: {} }, cell)
 
     expect(run.passed).toBe(false)
     expect(run.pointsEarned).toBe(0)
@@ -49,11 +49,11 @@ describe('Retail Foundations checkpoint (Sprint 5 end-to-end)', () => {
   it('disabling the Products relationship lowers the score and fails exactly the relevant rules', () => {
     const { model, datasets, salesTableId, productRelationshipId } = buildRetailModel()
     const solved = addRetailFoundationsSolution(model, datasets, salesTableId)
-    const baseline = runValidation({ datasets, models: { [solved.id]: solved } }, cellFor(solved.id))
+    const baseline = runValidation({ datasets, models: { [solved.id]: solved }, queries: {}, queryEvaluations: {} }, cellFor(solved.id))
     expect(baseline.passed).toBe(true)
 
     const { model: broken } = setRelationshipActive(solved, productRelationshipId, false)
-    const run = runValidation({ datasets, models: { [broken.id]: broken } }, cellFor(broken.id))
+    const run = runValidation({ datasets, models: { [broken.id]: broken }, queries: {}, queryEvaluations: {} }, cellFor(broken.id))
 
     expect(run.percentage).toBeLessThan(baseline.percentage)
     // Directly broken: the relationship rule itself, and the filtered cases in "Filter behavior"
@@ -74,7 +74,7 @@ describe('Retail Foundations checkpoint (Sprint 5 end-to-end)', () => {
   it('replacing Total Revenue with a hardcoded literal passes the unfiltered fixture but fails filtered ones — no full credit', () => {
     const { model, datasets, salesTableId } = buildRetailModel()
     const solved = addRetailFoundationsSolution(model, datasets, salesTableId)
-    const baseline = runValidation({ datasets, models: { [solved.id]: solved } }, cellFor(solved.id))
+    const baseline = runValidation({ datasets, models: { [solved.id]: solved }, queries: {}, queryEvaluations: {} }, cellFor(solved.id))
     expect(baseline.passed).toBe(true)
 
     const revenueMeasure = solved.measures.find((m) => m.name === 'Total Revenue')!
@@ -82,7 +82,7 @@ describe('Retail Foundations checkpoint (Sprint 5 end-to-end)', () => {
       .tables[0].rows.reduce((sum, r) => sum + (r.Revenue as number), 0)
 
     const hardcoded = updateMeasure(solved, datasets, revenueMeasure.id, { expression: String(totalRevenue) }).model
-    const run = runValidation({ datasets, models: { [hardcoded.id]: hardcoded } }, cellFor(hardcoded.id))
+    const run = runValidation({ datasets, models: { [hardcoded.id]: hardcoded }, queries: {}, queryEvaluations: {} }, cellFor(hardcoded.id))
 
     expect(ruleById(run, 'measure-total-revenue').status).toBe('passed') // unfiltered case still matches
     expect(ruleById(run, 'context-total-revenue').status).toBe('failed') // every filtered case fails
@@ -98,7 +98,7 @@ describe('Retail Foundations checkpoint (Sprint 5 end-to-end)', () => {
     const totalRevenue = datasets[salesDsId].tables[0].rows.reduce((sum, r) => sum + (r.Revenue as number), 0)
 
     const hardcoded = updateMeasure(solved, datasets, revenueMeasure.id, { expression: String(totalRevenue) }).model
-    const run = runValidation({ datasets, models: { [hardcoded.id]: hardcoded } }, cellFor(hardcoded.id))
+    const run = runValidation({ datasets, models: { [hardcoded.id]: hardcoded }, queries: {}, queryEvaluations: {} }, cellFor(hardcoded.id))
 
     expect(run.pointsEarned).toBeLessThan(run.pointsPossible)
   })
@@ -109,7 +109,7 @@ describe('Retail Foundations checkpoint (Sprint 5 end-to-end)', () => {
     const { model: disabled } = setRelationshipActive(solved, productRelationshipId, false)
     const { model: reenabled } = setRelationshipActive(disabled, productRelationshipId, true)
 
-    const run = runValidation({ datasets, models: { [reenabled.id]: reenabled } }, cellFor(reenabled.id))
+    const run = runValidation({ datasets, models: { [reenabled.id]: reenabled }, queries: {}, queryEvaluations: {} }, cellFor(reenabled.id))
     expect(run.percentage).toBeCloseTo(100, 5)
     expect(run.passed).toBe(true)
   })

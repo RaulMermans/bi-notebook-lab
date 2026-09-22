@@ -1,14 +1,39 @@
 import { describe, expect, it } from 'vitest'
+import type { QueryDefinition, QueryEvaluation } from '../../../src/domain/query'
 import { addTable, createModel } from '../../../src/runtime/model/modelRuntime'
 import {
   resolveCalculatedColumnSelector,
   resolveColumnSelector,
   resolveMeasureSelector,
+  resolveQueryColumnSelector,
+  resolveQuerySelector,
   resolveTableSelector,
 } from '../../../src/runtime/validation/selectorResolver'
 import { createCalculatedColumn } from '../../../src/runtime/calculatedColumn/calculatedColumnRuntime'
 import { createMeasure } from '../../../src/runtime/measure/measureRuntime'
 import { buildRetailModel } from './helpers'
+
+function query(id: string, name: string): QueryDefinition {
+  const now = new Date().toISOString()
+  return { id, name, source: { kind: 'dataset-table', datasetId: 'ds', tableId: 'tbl' }, steps: [], outputDatasetId: `${id}-out-ds`, outputTableId: `${id}-out-table`, loadEnabled: true, createdAt: now, updatedAt: now }
+}
+
+function evaluationWithColumns(queryId: string, columns: { id: string; name: string }[]): QueryEvaluation {
+  return {
+    queryId,
+    status: 'success',
+    output: {
+      id: `${queryId}-out-ds`,
+      name: 'Output',
+      source: { type: 'query', queryId, revision: 'r1' },
+      tables: [{ id: `${queryId}-out-table`, name: 'Output', columns: columns.map((c) => ({ ...c, dataType: 'string', nullable: true })), rows: [], rowCount: 0 }],
+      createdAt: new Date().toISOString(),
+    },
+    stepResults: [],
+    diagnostics: [],
+    fingerprint: 'fp',
+  }
+}
 
 describe('selectorResolver', () => {
   it('resolves a table by name', () => {
@@ -97,5 +122,52 @@ describe('selectorResolver', () => {
     const emptyModel = createModel('Empty')
     const result = resolveTableSelector(emptyModel, datasets, { tableName: 'Sales' })
     expect(result.ok).toBe(false)
+  })
+
+  describe('resolveQuerySelector (Sprint 14)', () => {
+    it('resolves a query by exact name, case-insensitively', () => {
+      const queries = { q1: query('q1', 'Customers_Clean') }
+      const result = resolveQuerySelector(queries, { queryName: 'customers_clean' })
+      expect(result.ok).toBe(true)
+      if (result.ok) expect(result.value.id).toBe('q1')
+    })
+
+    it('returns VALIDATION_TARGET_NOT_FOUND for a missing query', () => {
+      const result = resolveQuerySelector({}, { queryName: 'Nope' })
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION_TARGET_NOT_FOUND')
+    })
+
+    it('returns VALIDATION_TARGET_AMBIGUOUS for two queries sharing a name — never silently picks the first', () => {
+      const queries = { q1: query('q1', 'Sales_Clean'), q2: query('q2', 'Sales_Clean') }
+      const result = resolveQuerySelector(queries, { queryName: 'Sales_Clean' })
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION_TARGET_AMBIGUOUS')
+    })
+  })
+
+  describe('resolveQueryColumnSelector (Sprint 14)', () => {
+    it('resolves a column on the query’s evaluated output', () => {
+      const queries = { q1: query('q1', 'Customers_Clean') }
+      const queryEvaluations = { q1: evaluationWithColumns('q1', [{ id: 'c1', name: 'CustomerID' }]) }
+      const result = resolveQueryColumnSelector(queries, queryEvaluations, { query: { queryName: 'Customers_Clean' }, columnName: 'customerid' })
+      expect(result.ok).toBe(true)
+      if (result.ok) expect(result.value.columnId).toBe('c1')
+    })
+
+    it('is "not found" (not a config error) when the query has no output yet — the learner just hasn\'t built it', () => {
+      const queries = { q1: query('q1', 'Customers_Clean') }
+      const result = resolveQueryColumnSelector(queries, {}, { query: { queryName: 'Customers_Clean' }, columnName: 'CustomerID' })
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION_TARGET_NOT_FOUND')
+    })
+
+    it('is "not found" when the column does not exist on the output yet', () => {
+      const queries = { q1: query('q1', 'Customers_Clean') }
+      const queryEvaluations = { q1: evaluationWithColumns('q1', [{ id: 'c1', name: 'CustomerID' }]) }
+      const result = resolveQueryColumnSelector(queries, queryEvaluations, { query: { queryName: 'Customers_Clean' }, columnName: 'Country' })
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION_TARGET_NOT_FOUND')
+    })
   })
 })

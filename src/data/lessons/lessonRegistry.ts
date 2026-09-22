@@ -1,5 +1,6 @@
 import type { BuiltInLesson } from '../../domain/learning'
 import { filterContextLesson } from './filterContextLesson'
+import { powerQueryLesson } from './powerQueryLesson'
 import { retailFoundationsLesson } from './retailFoundationsLesson'
 import { timeIntelligenceLesson } from './timeIntelligenceLesson'
 
@@ -11,7 +12,7 @@ import { timeIntelligenceLesson } from './timeIntelligenceLesson'
  * future Authoring phase (ROADMAP.md Phase 10); see
  * docs/LEARNING_SYSTEM.md "Future authoring boundary".
  */
-const BUILT_IN_LESSONS: BuiltInLesson[] = [retailFoundationsLesson, filterContextLesson, timeIntelligenceLesson]
+const BUILT_IN_LESSONS: BuiltInLesson[] = [retailFoundationsLesson, filterContextLesson, timeIntelligenceLesson, powerQueryLesson]
 
 const duplicateIds = BUILT_IN_LESSONS.map((lesson) => lesson.definition.id).filter((id, index, ids) => ids.indexOf(id) !== index)
 if (duplicateIds.length > 0) {

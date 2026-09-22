@@ -92,6 +92,16 @@ V1 is complete when a learner can:
 > deterministic starting state, progressive hints, and a historical
 > `Progress` view across repeated attempts. See
 > [`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md).
+>
+> Sprint 14 adds a fourth lesson, **Power Query — Cleaning & Reshaping
+> Data**, graded entirely through **Direct Query Validation**
+> (`docs/QUERY_VALIDATION.md`) with no Semantic Model at all — the first
+> lesson to exercise a `{ kind: 'workspace' }`-scoped `TestCell`. It also
+> generalizes a lesson to any number of independent checkpoints instead of
+> exactly one, so "reach checkpoint → run validation → receive score" can
+> happen several times per lesson, each stage graded on its own.
+
+
 
 ## Explicit non-goals for V1
 
@@ -113,7 +123,16 @@ V1 is complete when a learner can:
 > shipped). "Power Query / M" above meant no pre-model transformation layer
 > at all; Sprint 12 added one, but strictly through typed Applied Steps —
 > **not** an arbitrary M parser/interpreter, query folding, or the Advanced
-> Editor. See [`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md)
-> "M-language boundary". DirectQuery, Power BI Service, gateways, Fabric,
-> RLS, enterprise connectors, and full DAX grammar remain genuinely out of
-> scope.
+> Editor. Sprint 14 widened the Applied Steps set considerably (Pivot,
+> Unpivot, Conditional Column, Index Column, Custom Column) and added a
+> bounded, non-M scalar expression subset for Custom Column — still not an
+> M interpreter (see
+> [`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md)
+> "M-language boundary" and
+> [`docs/POWER_QUERY_EXPRESSIONS.md`](./docs/POWER_QUERY_EXPRESSIONS.md)).
+> DirectQuery ("DAX against a live source"), Power BI Service, gateways,
+> Fabric, RLS, enterprise connectors, and full DAX grammar remain genuinely
+> out of scope. ("Direct Query Validation," Sprint 14's validation-engine
+> feature, is an unrelated, internally-named concept — it grades a Power
+> Query output directly, and has nothing to do with Power BI's DirectQuery
+> connectivity mode.)

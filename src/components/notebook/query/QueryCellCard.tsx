@@ -7,11 +7,15 @@ import type { NewStepInput } from '../../../runtime/query/queryStepFactory'
 import {
   AppendQueriesForm,
   ChangeTypeForm,
+  ConditionalColumnForm,
+  CustomColumnForm,
   FillForm,
   FilterRowsForm,
   GroupByForm,
+  IndexColumnForm,
   MergeColumnsForm,
   MergeQueriesForm,
+  PivotColumnForm,
   RemoveColumnsForm,
   RemoveDuplicatesForm,
   RenameColumnsForm,
@@ -19,6 +23,7 @@ import {
   ReplaceValuesForm,
   SortRowsForm,
   SplitColumnForm,
+  UnpivotColumnsForm,
 } from './queryStepForms'
 
 const PREVIEW_ROW_LIMIT = 500
@@ -54,6 +59,11 @@ const TOOLBAR_KINDS: { kind: QueryStepKind; label: string }[] = [
   { kind: 'group-by', label: 'Group By' },
   { kind: 'merge-queries', label: 'Merge Queries' },
   { kind: 'append-queries', label: 'Append Queries' },
+  { kind: 'pivot-column', label: 'Pivot' },
+  { kind: 'unpivot-columns', label: 'Unpivot' },
+  { kind: 'conditional-column', label: 'Conditional Column' },
+  { kind: 'index-column', label: 'Index Column' },
+  { kind: 'custom-column', label: 'Custom Column' },
 ]
 
 function stepStatusIcon(step: QueryStep, evaluation: QueryEvaluationDetail | undefined): string {
@@ -271,6 +281,11 @@ export function QueryCellCard({
         {activeToolbarKind === 'append-queries' && (
           <AppendQueriesForm otherQueries={otherQueries} currentColumnNames={formColumns.map((c) => c.name)} onSubmit={handleSubmitStep} onCancel={() => setActiveToolbarKind(null)} />
         )}
+        {activeToolbarKind === 'pivot-column' && <PivotColumnForm columns={formColumns} onSubmit={handleSubmitStep} onCancel={() => setActiveToolbarKind(null)} />}
+        {activeToolbarKind === 'unpivot-columns' && <UnpivotColumnsForm columns={formColumns} onSubmit={handleSubmitStep} onCancel={() => setActiveToolbarKind(null)} />}
+        {activeToolbarKind === 'conditional-column' && <ConditionalColumnForm columns={formColumns} onSubmit={handleSubmitStep} onCancel={() => setActiveToolbarKind(null)} />}
+        {activeToolbarKind === 'index-column' && <IndexColumnForm columns={formColumns} onSubmit={handleSubmitStep} onCancel={() => setActiveToolbarKind(null)} />}
+        {activeToolbarKind === 'custom-column' && <CustomColumnForm columns={formColumns} onSubmit={handleSubmitStep} onCancel={() => setActiveToolbarKind(null)} />}
 
         <details className="query-settings">
           <summary>Query Settings</summary>

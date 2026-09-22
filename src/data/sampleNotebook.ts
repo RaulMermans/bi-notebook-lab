@@ -70,7 +70,7 @@ export const sampleNotebook: NotebookDocument = {
       id: 'test',
       kind: 'test',
       title: 'Validation',
-      modelId: 'sample-retail-model',
+      scope: { kind: 'model', modelId: 'sample-retail-model' },
       prompt: 'The validation engine will check model structure and expected results.',
       validation: placeholderValidation,
       status: 'idle',

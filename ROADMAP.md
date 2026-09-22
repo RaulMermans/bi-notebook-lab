@@ -468,6 +468,70 @@ details, architecture, and known Power Query compatibility boundaries
 
 ---
 
+## Phase 8.9 — Advanced Power Query, Direct Query Validation & Multi-Checkpoint Learning ✅ complete
+
+> Referred to as "Sprint 14" in its own implementation brief.
+
+- five more `QueryStep` kinds: **Pivot Column** (dynamic, data-dependent
+  output columns identified by a pure deterministic hash of `stepId` +
+  canonicalized pivot value — never a minted id, never persisted, never
+  ambiguous between row orders or re-evaluations), **Unpivot Columns**,
+  **Conditional Column** (first-match-wins clauses reusing Filter Rows' own
+  comparison semantics via a new shared `scalarMatch.ts`), **Index Column**,
+  and **Custom Column** — a bounded, non-M scalar expression subset with its
+  own lexer → parser → binder → evaluator pipeline
+  (`runtime/query/expression/`), never `eval`/`new Function`
+- `TestCell.modelId: string` migrated to `TestCell.scope: TestCellScope =
+  { kind: 'model'; modelId } | { kind: 'workspace' }` — a full breaking
+  migration with no compatibility shim (this codebase has never had
+  persistence schema-versioning; it's a local dev tool with no deployed
+  users yet)
+- **Direct Query Validation**: 6 new `ValidationRule` types
+  (`query-present`, `query-health`, `query-output-schema`,
+  `query-output-row-count`, `query-output-value`, `query-step-semantics`)
+  that grade a Power Query `QueryDefinition`'s output directly — existence,
+  evaluation health, asserted columns/types, row count, specific values by
+  row identity, and which Applied Step *kinds* it uses — with **no
+  Semantic Model required at all**; `ValidationSnapshot` gained
+  `queries`/`queryEvaluations`, and the 8 pre-existing rule types needed
+  zero code changes (the model-required dispatch lives entirely in
+  `validationEngine.ts`'s ternary, not scattered through each evaluator)
+- a lesson can now define **multiple independent checkpoints** instead of
+  exactly one — `isLessonComplete`/`useLessonWorkspace` are keyed by
+  `Record<checkpointValidationId, ...>` maps, a single-checkpoint lesson is
+  just the one-entry case, and a `LessonAttempt` is still recorded exactly
+  once, on the specific check that flips the *whole lesson* from incomplete
+  to complete
+- a real bug found and fixed during manual browser verification:
+  `TestCellCard.tsx`'s missing-model placeholder used to show for every
+  workspace-scoped checkpoint (which legitimately has no model); the guard
+  is now `cell.scope.kind === 'model' && !model`
+- a 4th built-in lesson, **Power Query — Cleaning & Reshaping Data**
+  (intermediate, 5 stages, 4 independent workspace-scoped checkpoints) — the
+  first lesson with no Semantic Model anywhere, graded purely on Power
+  Query state; a new `Monthly_Targets_Wide` fixture was added specifically
+  to motivate Unpivot Columns
+- verified end-to-end via a full Playwright walkthrough: every new Applied
+  Step built through the real UI (including the Custom Column textarea's
+  live inline parse/bind diagnostic on a broken expression, with Apply
+  correctly disabled), all 4 checkpoints passed independently and
+  out-of-order, historical progress correctly persisting across a reload
+  while live per-stage state correctly does not resurrect, and zero
+  regressions across the three Sprint 13 lessons and the Free Lab
+- 106 test files / 857 tests passing, typechecked, built
+
+**Exit:** the practice environment can now grade Power Query work directly,
+not only through a downstream model, and a lesson's assessment shape is no
+longer artificially limited to one checkpoint. See
+[`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md),
+[`docs/APPLIED_STEPS.md`](./docs/APPLIED_STEPS.md),
+[`docs/POWER_QUERY_EXPRESSIONS.md`](./docs/POWER_QUERY_EXPRESSIONS.md),
+[`docs/QUERY_VALIDATION.md`](./docs/QUERY_VALIDATION.md) and
+[`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md) for implementation
+details, architecture, and known compatibility boundaries.
+
+---
+
 ## Phase 9 — Learning System ✅
 
 - lesson catalog ✅ (`LessonCatalog`, difficulty filter)
@@ -487,6 +551,12 @@ model, architecture, and persistence/staleness boundaries.
 
 **Exit:** product works as a repeatable training environment. ✅
 
+> **Sprint 14 addendum**: a 4th lesson, **Power Query — Cleaning &
+> Reshaping Data** (intermediate), ships — see Phase 8.9 above. The Learning
+> System itself was generalized from exactly one checkpoint stage per
+> lesson to any number of independent checkpoints, which is what let this
+> lesson define four.
+
 ---
 
 ## Phase 10 — Authoring
@@ -501,20 +571,40 @@ model, architecture, and persistence/staleness boundaries.
 
 ---
 
+## Recommended Sprint 15 — V1 Authoring, UX Hardening & Release Readiness
+
+Phase 8.9 (Sprint 14) closed the two candidates this section previously
+weighed against each other — Advanced Power Query shipped, and Direct Query
+Validation gave the Learning System a way to grade it directly. Between the
+runtime (Power Query, the full DAX subset, advanced relationships) and the
+learning surface (four lessons, multi-checkpoint grading, progress
+history), the product now has enough breadth for a serious V1 pass rather
+than another engine-capability sprint:
+
+- an authoring path for new lessons/checkpoints (still code-owned
+  TypeScript per AGENTS.md — no JSON/DSL bundle format yet — but the
+  friction of writing `powerQueryLessonValidation.ts`-style specs by hand
+  is worth revisiting now that a 4th lesson exists as a template)
+- UX hardening across the Applied Steps UI, the Learning System, and the
+  Free Lab (the sprint briefs to date have repeatedly deferred "visual
+  polish before runtime correctness" — AGENTS.md — and a growing backlog of
+  that deferred work is now large enough to be its own sprint)
+- release-readiness housekeeping: the one pre-existing >500kB chunk-size
+  build warning, broader manual-verification coverage, and anything else
+  that would block calling this a shippable V1
+
+**Only Calculated Tables** (`CALENDAR`/`CALENDARAUTO`,
+`SELECTCOLUMNS`/`ADDCOLUMNS`, `SUMMARIZE`, and calculated tables built from
+DAX table expressions rather than an import/query) **should displace this
+recommendation** — and only if real lesson use demonstrates it's actually
+blocking something important, not on feature-completeness grounds alone.
+
+---
+
 ## Later, only if validated
 
-- **Advanced Power Query + M Fundamentals** (candidate for Sprint 14, per
-  actual friction using the Learning System — Power Query has no built-in
-  lesson yet, deliberately: see docs/LEARNING_SYSTEM.md "Why no Power Query
-  lesson yet") — Pivot/Unpivot, Conditional Column, Index Column, Custom
-  Column, and basic/generated-M concepts, bounded to the same typed-step
-  architecture (still no arbitrary M interpreter).
-- **Calculated Tables & Advanced Model Objects** (the alternative Sprint 14
-  candidate) — `CALENDAR`/`CALENDARAUTO`, `SELECTCOLUMNS`/`ADDCOLUMNS`,
-  `SUMMARIZE`, and calculated tables built from DAX table expressions
-  rather than an import/query. Reassess which gap matters more once the
-  Learning System (Phase 9) has seen real repeated use — let observed
-  lesson-authoring friction pick the gap, not feature-completeness alone.
+- **Calculated Tables & Advanced Model Objects** — see above; the leading
+  candidate to interrupt Sprint 15 if evidence demands it.
 - custom datasets
 - shareable notebooks
 - desktop wrapper

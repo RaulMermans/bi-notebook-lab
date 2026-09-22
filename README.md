@@ -49,8 +49,10 @@ Sprint 5 (Validation Engine), Sprint 6 (Context Visualizer), Sprint 7
 Sprint 9 (Iterators, Table Expressions & Conditional Logic), Sprint 10
 (Date Tables & Classic Time Intelligence), Sprint 11 (Advanced
 Relationships & `USERELATIONSHIP`/`CROSSFILTER`), Sprint 12 (Power
-Query & Data Transformation Runtime) and Sprint 13 (Learning System —
-lesson catalog, guided stages, hints, progress) are complete — the full MVP
+Query & Data Transformation Runtime), Sprint 13 (Learning System —
+lesson catalog, guided stages, hints, progress) and Sprint 14 (Advanced
+Applied Steps, Direct Query Validation, and Multi-Checkpoint Lessons) are
+complete — the full MVP
 learning loop (import → model → calculated columns → measures → filter
 context manipulation → visualize → validate) now works end to end, with real
 row-iterating DAX (`SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX`), conditional
@@ -178,23 +180,46 @@ relationship model on top. This repository now contains:
 
 - **Learning System** — an `Exercises` catalog of built-in lessons
   (**Retail Foundations**, **Filter Context & CALCULATE**, **Time
-  Intelligence**), each with a deterministic starting notebook, guided
-  stages with progressive hints and an on-demand solution, and a
-  checkpoint graded by the *exact same* Validation Engine a hand-built
-  `TestCell` uses — the Learning System adds zero new scoring logic. A
+  Intelligence**, **Power Query — Cleaning & Reshaping Data**), each with a
+  deterministic starting notebook, guided stages with progressive hints and
+  an on-demand solution, and one or more checkpoints graded by the *exact
+  same* Validation Engine a hand-built `TestCell` uses — the Learning System
+  adds zero new scoring logic. A lesson may define several independent
+  checkpoints (Sprint 14) that complete in any order, not just one. A
   `Progress` view aggregates versioned, immutable attempt history (best
   score, attempts, completion) separately from live validation truth, which
   is still never persisted: reloading mid-lesson always requires
-  re-checking the checkpoint. The Free Lab (this notebook, with no lesson
+  re-checking every checkpoint. The Free Lab (this notebook, with no lesson
   selected) is completely unaffected — a lesson's notebook is persisted
   under its own key. See
   [`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md).
 
+- **Advanced Applied Steps & Direct Query Validation** — five more `QueryStep`
+  kinds: **Pivot Column** (one row-value per distinct pivot value becomes its
+  own column, with a deterministic, data-independent output-column identity
+  — see `docs/POWER_QUERY_RUNTIME.md` "Pivot column identity"), **Unpivot
+  Columns** (the inverse — collapse several columns into one attribute/value
+  pair), **Conditional Column** (first-match-wins clauses reusing Filter
+  Rows' own comparison semantics), **Index Column**, and **Custom Column** —
+  a bounded, non-M scalar expression subset (`[Column]` refs, arithmetic,
+  `&` text concatenation, comparisons, `if...then...else`, a small
+  `Text.*`/`Number.*`/`Date.*` function set) parsed and evaluated by a real
+  lexer → parser → binder → evaluator pipeline that never calls `eval`/`new
+  Function`. See [`docs/APPLIED_STEPS.md`](./docs/APPLIED_STEPS.md) and
+  [`docs/POWER_QUERY_EXPRESSIONS.md`](./docs/POWER_QUERY_EXPRESSIONS.md).
+  Alongside this, `TestCell` gained a `scope` (`{ kind: 'model' }` or
+  `{ kind: 'workspace' }`) and the Validation Engine gained **Direct Query
+  Validation** — six rule types that grade a Power Query `QueryDefinition`'s
+  output (existence, health, schema, row count, specific values, and which
+  Applied Step kinds it uses) without requiring a Semantic Model at all. See
+  [`docs/QUERY_VALIDATION.md`](./docs/QUERY_VALIDATION.md).
+
 Calendar-based (Auto date/time) time intelligence, `TREATAS`, composite
-models, full DAX compatibility, and an arbitrary Power Query M
-parser/interpreter (Sprint 12 implements typed Applied Steps, not M — see
-`docs/POWER_QUERY_RUNTIME.md` "M-language boundary") remain **not**
-implemented — see
+models, full DAX compatibility, calculated tables, and an arbitrary Power
+Query M parser/interpreter (Sprint 12/14 implement typed Applied Steps and a
+bounded Custom Column expression subset, not M — see
+`docs/POWER_QUERY_RUNTIME.md` "M-language boundary" and
+`docs/POWER_QUERY_EXPRESSIONS.md`) remain **not** implemented — see
 [`docs/ITERATORS.md`](./docs/ITERATORS.md),
 [`docs/TABLE_EXPRESSIONS.md`](./docs/TABLE_EXPRESSIONS.md),
 [`docs/CALCULATE.md`](./docs/CALCULATE.md),
@@ -309,7 +334,9 @@ match.
 - [`docs/USERELATIONSHIP.md`](./docs/USERELATIONSHIP.md)
 - [`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md)
 - [`docs/APPLIED_STEPS.md`](./docs/APPLIED_STEPS.md)
+- [`docs/POWER_QUERY_EXPRESSIONS.md`](./docs/POWER_QUERY_EXPRESSIONS.md)
 - [`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md)
+- [`docs/QUERY_VALIDATION.md`](./docs/QUERY_VALIDATION.md)
 
 ## Scope guardrail
 

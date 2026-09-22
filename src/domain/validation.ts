@@ -1,4 +1,6 @@
+import type { DataType } from './data'
 import type { CrossFilterDirection, ModelDiagnosticCode, RelationshipCardinality, RelationshipSide } from './model'
+import type { QueryStepKind } from './query'
 
 /**
  * Author-facing selectors — the Sprint 5 layer that lets an exercise
@@ -34,6 +36,21 @@ export interface MeasureSelector {
 export interface CalculatedColumnSelector {
   table: TableSelector
   name: string
+}
+
+/**
+ * Sprint 14: resolves a Power Query `QueryDefinition` by its author-facing
+ * name — the query counterpart to `TableSelector`. Never a generated
+ * `queryId` (docs/QUERY_VALIDATION.md "QuerySelector").
+ */
+export interface QuerySelector {
+  queryName: string
+}
+
+/** Resolves a column on a query's *evaluated output* — not a model column, so a missing one means "the learner hasn't produced it yet" rather than a config error (see `runtime/validation/selectorResolver.ts#classifyQuerySelectorFailure`). */
+export interface QueryColumnSelector {
+  query: QuerySelector
+  columnName: string
 }
 
 /**
@@ -73,6 +90,12 @@ export type ValidationRuleType =
   | 'measure-result'
   | 'expression-semantics'
   | 'date-table'
+  | 'query-present'
+  | 'query-health'
+  | 'query-output-schema'
+  | 'query-output-row-count'
+  | 'query-output-value'
+  | 'query-step-semantics'
 
 export interface BaseValidationRule {
   id: string
@@ -185,6 +208,81 @@ export interface DateTableValidationRule extends BaseValidationRule {
   dateColumn: ColumnSelector
 }
 
+/** Verifies a learner-created query exists — the query counterpart to `table-present`. Ambiguity (two queries sharing a name) is a configuration error, never silently resolved to the first match. */
+export interface QueryPresentValidationRule extends BaseValidationRule {
+  type: 'query-present'
+  query: QuerySelector
+}
+
+/** Passes when the query's current `QueryEvaluation.status === 'success'`. Failure feedback summarizes the relevant `QueryDiagnostic`s in learner-facing terms — raw diagnostics are evidence, not feedback. */
+export interface QueryHealthValidationRule extends BaseValidationRule {
+  type: 'query-health'
+  query: QuerySelector
+}
+
+export interface QueryOutputColumnAssertion {
+  name: string
+  dataType?: DataType
+  /** Defaults to `true`. `false` asserts the column must NOT exist (e.g. a raw column that should have been removed/renamed away). */
+  present?: boolean
+}
+
+/** No whole-schema equality requirement — only the listed columns are asserted (sprint brief "Do not require exact whole-schema equality unless explicitly configured"). */
+export interface QueryOutputSchemaValidationRule extends BaseValidationRule {
+  type: 'query-output-schema'
+  query: QuerySelector
+  columns: QueryOutputColumnAssertion[]
+}
+
+export type QueryRowCountAssertion =
+  | { mode: 'equals'; value: number }
+  | { mode: 'minimum'; value: number }
+  | { mode: 'maximum'; value: number }
+  | { mode: 'range'; min: number; max: number }
+
+export interface QueryOutputRowCountValidationRule extends BaseValidationRule {
+  type: 'query-output-row-count'
+  query: QuerySelector
+  rowCount: QueryRowCountAssertion
+}
+
+/** Identifies a row on a query's output by an equality match on one of its columns — mirrors `RowSelector`, never "row N" (docs/VALIDATION_ENGINE.md "Row identity"). */
+export interface QueryRowSelector {
+  columnName: string
+  equals: unknown
+}
+
+export interface QueryOutputValueCase {
+  id: string
+  title?: string
+  row: QueryRowSelector
+  expected: { columnName: string; value: ValidationScalar; tolerance?: NumericTolerance }
+}
+
+export interface QueryOutputValueValidationRule extends BaseValidationRule {
+  type: 'query-output-value'
+  query: QuerySelector
+  cases: QueryOutputValueCase[]
+}
+
+/**
+ * Bounded, outcome-agnostic assertions over which Applied Step *kinds* a
+ * query uses — never step ids, names, or exact step arrays, so renaming
+ * "Unpivoted Columns" to "Make Months Long" can never fail a check (sprint
+ * brief §21).
+ */
+export type QueryStepSemanticAssertion =
+  | { kind: 'uses-step'; stepKind: QueryStepKind }
+  | { kind: 'does-not-use-step'; stepKind: QueryStepKind }
+  | { kind: 'step-before'; earlier: QueryStepKind; later: QueryStepKind }
+  | { kind: 'load-enabled' }
+
+export interface QueryStepSemanticsValidationRule extends BaseValidationRule {
+  type: 'query-step-semantics'
+  query: QuerySelector
+  assertions: QueryStepSemanticAssertion[]
+}
+
 export type ValidationRule =
   | RelationshipValidationRule
   | RelationshipConfigValidationRule
@@ -194,6 +292,12 @@ export type ValidationRule =
   | MeasureResultValidationRule
   | ExpressionSemanticValidationRule
   | DateTableValidationRule
+  | QueryPresentValidationRule
+  | QueryHealthValidationRule
+  | QueryOutputSchemaValidationRule
+  | QueryOutputRowCountValidationRule
+  | QueryOutputValueValidationRule
+  | QueryStepSemanticsValidationRule
 
 /**
  * The canonical, persisted validation contract — lives on a `TestCell`

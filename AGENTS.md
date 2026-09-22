@@ -29,14 +29,16 @@ A learner progresses through executable cells that expose data modeling and anal
 ## Current supported scope
 
 The "Initial supported scope" below described the Sprint 1–2 starting point.
-Sprints 3–13 have since shipped well past it — calculated columns, measures,
+Sprints 3–14 have since shipped well past it — calculated columns, measures,
 CALCULATE, iterators/table expressions, classic time intelligence, advanced
 relationships (USERELATIONSHIP/CROSSFILTER), a Power Query transformation
-layer (Sprint 12, see docs/POWER_QUERY_RUNTIME.md), and a lesson-based
-Learning System (Sprint 13, see docs/LEARNING_SYSTEM.md) all exist in-repo.
-Treat this list as scope history, not a current restriction — check
-ROADMAP.md for what has actually shipped before assuming something is out
-of scope.
+layer (Sprint 12, see docs/POWER_QUERY_RUNTIME.md), a lesson-based
+Learning System (Sprint 13, see docs/LEARNING_SYSTEM.md), and advanced
+Applied Steps plus Direct Query Validation and multi-checkpoint lessons
+(Sprint 14, see docs/APPLIED_STEPS.md, docs/QUERY_VALIDATION.md and
+docs/LEARNING_SYSTEM.md) all exist in-repo. Treat this list as scope
+history, not a current restriction — check ROADMAP.md for what has actually
+shipped before assuming something is out of scope.
 
 Delivered:
 
@@ -47,20 +49,35 @@ Delivered:
 - row/filter context
 - validation, including staleness tracking
 - explanation traces
-- Power Query: typed Applied Steps, query dependency graph, Merge/Append (Sprint 12)
+- Power Query: typed Applied Steps, query dependency graph, Merge/Append
+  (Sprint 12); Pivot Column, Unpivot Columns, Conditional Column, Index
+  Column and Custom Column — the last backed by a bounded, non-M scalar
+  expression subsystem (lexer/parser/binder/evaluator, never `eval`) — round
+  out the Applied Steps set to nineteen kinds (Sprint 14, see
+  docs/APPLIED_STEPS.md and docs/POWER_QUERY_EXPRESSIONS.md)
+- Direct Query Validation: `TestCell.scope` (`model` or `workspace`) and six
+  `ValidationRule` types that grade a Power Query output directly — no
+  Semantic Model required (Sprint 14, see docs/QUERY_VALIDATION.md)
 - Learning System: lesson catalog, guided stages, progressive hints, solution
   reveal, reset/new-attempt, versioned historical progress (Sprint 13, three
-  built-in lessons — see docs/LEARNING_SYSTEM.md)
+  built-in lessons), generalized to any number of independent per-lesson
+  checkpoints and a 4th built-in lesson graded purely through Direct Query
+  Validation (Sprint 14 — see docs/LEARNING_SYSTEM.md)
 
 Still avoid (no roadmap phase has required these):
 
 - an arbitrary Power Query M parser/interpreter or query folding (Sprint 12
-  implements Power Query's transformation workflow through typed steps only —
-  see docs/POWER_QUERY_RUNTIME.md "M-language boundary")
+  implements Power Query's transformation workflow through typed steps only,
+  and Sprint 14's Custom Column expression subsystem is a small bounded
+  scalar grammar of its own, not M — see docs/POWER_QUERY_RUNTIME.md
+  "M-language boundary" and docs/POWER_QUERY_EXPRESSIONS.md)
 - a lesson-authoring UI, a JSON/DSL lesson bundle format, or a remote lesson
-  registry (Sprint 13's lessons are code-owned TypeScript — see
-  docs/LEARNING_SYSTEM.md "Future authoring boundary"; this is ROADMAP.md
-  Phase 10, not yet started)
+  registry (every built-in lesson, including Sprint 14's 4th one, is
+  code-owned TypeScript — see docs/LEARNING_SYSTEM.md "Future authoring
+  boundary"; this is ROADMAP.md Phase 10, not yet started)
+- Calculated Tables / CALENDAR/CALENDARAUTO / SELECTCOLUMNS/ADDCOLUMNS/
+  SUMMARIZE (evaluated as a Sprint 14 candidate and deliberately deferred —
+  see ROADMAP.md "Recommended Sprint 15")
 - Power BI Service/Fabric
 - deployment infrastructure
 - authentication

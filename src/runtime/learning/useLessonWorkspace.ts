@@ -17,7 +17,7 @@ import {
 import { isValidationRunStale } from '../validation/fingerprint'
 import { runValidation } from '../validation/validationEngine'
 import { useNotebookRuntime } from '../notebook/useNotebookRuntime'
-import { createLessonAttemptFromValidationRun, isLessonComplete, isStageComplete, summarizeLessonProgress } from './lessonProgress'
+import { createLessonAttemptFromCheckpointRuns, isLessonComplete, isStageComplete, summarizeLessonProgress } from './lessonProgress'
 import { completeLessonSession, countRevealedHints, createLessonSession, markSolutionRevealed, revealNextHint, setCurrentStage } from './lessonSession'
 
 export type LessonSessionHydrationStatus = 'loading' | 'ready'
@@ -105,30 +105,58 @@ export function useLessonWorkspace(lesson: BuiltInLesson) {
     [notebook.cells],
   )
 
-  const checkpointStage = useMemo(() => definition.stages.find((stage) => stage.checkpointValidationId), [definition])
-  const checkpointTestCell = useMemo(
-    () => (checkpointStage ? testCells.find((cell) => cell.validation.id === checkpointStage.checkpointValidationId) : undefined),
-    [testCells, checkpointStage],
-  )
+  // Sprint 14: a lesson may define multiple independent checkpoint stages.
+  // Everything below is keyed by `LessonStage.checkpointValidationId` (one
+  // entry per checkpoint) rather than assuming there is exactly one — a
+  // single-checkpoint lesson (every Sprint 13 built-in) is just the
+  // one-entry case of the same maps.
+  const checkpointStages = useMemo(() => definition.stages.filter((stage) => stage.checkpointValidationId), [definition])
 
-  const checkpointRun = checkpointTestCell ? validationRuns[checkpointTestCell.id] : undefined
-  const checkpointStale = useMemo(() => {
-    if (!checkpointRun || !checkpointTestCell) return true
-    const model = models[checkpointTestCell.modelId]
-    if (!model) return true
-    return isValidationRunStale(checkpointRun, model, datasets, checkpointTestCell.validation)
-  }, [checkpointRun, checkpointTestCell, models, datasets])
+  const checkpointTestCellsByValidationId = useMemo(() => {
+    const map: Record<string, (typeof testCells)[number]> = {}
+    for (const stage of checkpointStages) {
+      const validationId = stage.checkpointValidationId!
+      const cell = testCells.find((c) => c.validation.id === validationId)
+      if (cell) map[validationId] = cell
+    }
+    return map
+  }, [testCells, checkpointStages])
+
+  const checkpointRunsByValidationId = useMemo(() => {
+    const runs: Record<string, ValidationRun | undefined> = {}
+    for (const stage of checkpointStages) {
+      const validationId = stage.checkpointValidationId!
+      const cell = checkpointTestCellsByValidationId[validationId]
+      runs[validationId] = cell ? validationRuns[cell.id] : undefined
+    }
+    return runs
+  }, [checkpointStages, checkpointTestCellsByValidationId, validationRuns])
+
+  const checkpointStaleByValidationId = useMemo(() => {
+    const stale: Record<string, boolean> = {}
+    for (const stage of checkpointStages) {
+      const validationId = stage.checkpointValidationId!
+      const cell = checkpointTestCellsByValidationId[validationId]
+      const run = checkpointRunsByValidationId[validationId]
+      stale[validationId] = !cell || !run ? true : isValidationRunStale(run, { models, datasets, queries, queryEvaluations }, cell)
+    }
+    return stale
+  }, [checkpointStages, checkpointTestCellsByValidationId, checkpointRunsByValidationId, models, datasets, queries, queryEvaluations])
 
   const stageCompletion = useMemo(() => {
     const completion: Record<string, boolean> = {}
     for (const stage of definition.stages) {
-      const isCheckpointStage = checkpointStage !== undefined && stage.id === checkpointStage.id
-      completion[stage.id] = isCheckpointStage ? isStageComplete(stage, checkpointRun, checkpointStale) : isStageComplete(stage, undefined, true)
+      if (stage.checkpointValidationId) {
+        const validationId = stage.checkpointValidationId
+        completion[stage.id] = isStageComplete(stage, checkpointRunsByValidationId[validationId], checkpointStaleByValidationId[validationId] ?? true)
+      } else {
+        completion[stage.id] = isStageComplete(stage, undefined, true)
+      }
     }
     return completion
-  }, [definition.stages, checkpointStage, checkpointRun, checkpointStale])
+  }, [definition.stages, checkpointRunsByValidationId, checkpointStaleByValidationId])
 
-  const lessonComplete = isLessonComplete(definition.stages, checkpointRun, checkpointStale)
+  const lessonComplete = isLessonComplete(definition.stages, checkpointRunsByValidationId, checkpointStaleByValidationId)
 
   const progress = useMemo(() => summarizeLessonProgress(lessonId, definition.version, attempts), [lessonId, definition.version, attempts])
 
@@ -160,25 +188,71 @@ export function useLessonWorkspace(lesson: BuiltInLesson) {
     [session, persistSession],
   )
 
-  const checkCheckpoint = useCallback((): ValidationRun | undefined => {
-    if (!checkpointTestCell) return undefined
-    const run = runValidation({ datasets, models }, checkpointTestCell)
-    setValidationRuns((runs) => ({ ...runs, [checkpointTestCell.id]: run }))
+  /**
+   * Checks one checkpoint stage's `TestCell` and records the result. A
+   * `LessonAttempt` is recorded only on the exact check that flips the
+   * *whole lesson* from incomplete to complete — comparing
+   * `wasComplete`/`isCompleteNow` computed from the pre- and post-update
+   * checkpoint-run maps within this same callback avoids depending on
+   * effect timing, and avoids recording a second attempt if the learner
+   * re-checks an already-passing checkpoint afterwards (sprint brief
+   * "Avoid double-counting the same checkpoint when it is re-run
+   * repeatedly").
+   */
+  const checkCheckpoint = useCallback(
+    (stageId: string): ValidationRun | undefined => {
+      const stage = definition.stages.find((s) => s.id === stageId)
+      const validationId = stage?.checkpointValidationId
+      if (!validationId) return undefined
+      const testCell = checkpointTestCellsByValidationId[validationId]
+      if (!testCell) return undefined
 
-    if (run.passed && session) {
-      const attempt = createLessonAttemptFromValidationRun({
-        lessonId,
-        lessonVersion: definition.version,
-        startedAt: session.startedAt,
-        run,
-        hintsUsed: countRevealedHints(session),
-      })
-      void appendLessonAttempt(lessonId, attempt).then((updated) => setAttempts(updated))
-      persistSession(completeLessonSession(session))
-    }
+      const run = runValidation({ datasets, models, queries, queryEvaluations }, testCell)
+      const updatedRuns = { ...validationRuns, [testCell.id]: run }
+      setValidationRuns(updatedRuns)
 
-    return run
-  }, [checkpointTestCell, datasets, models, session, lessonId, definition.version, persistSession])
+      const runByValidationId = (runs: Record<string, ValidationRun>): Record<string, ValidationRun | undefined> => {
+        const map: Record<string, ValidationRun | undefined> = {}
+        for (const s of checkpointStages) {
+          const vId = s.checkpointValidationId!
+          const cell = checkpointTestCellsByValidationId[vId]
+          map[vId] = cell ? runs[cell.id] : undefined
+        }
+        return map
+      }
+      const staleByValidationId = (runsByValidationId: Record<string, ValidationRun | undefined>): Record<string, boolean> => {
+        const map: Record<string, boolean> = {}
+        for (const s of checkpointStages) {
+          const vId = s.checkpointValidationId!
+          const cell = checkpointTestCellsByValidationId[vId]
+          const r = runsByValidationId[vId]
+          map[vId] = !cell || !r ? true : isValidationRunStale(r, { models, datasets, queries, queryEvaluations }, cell)
+        }
+        return map
+      }
+
+      const previousRunsByValidationId = runByValidationId(validationRuns)
+      const wasComplete = isLessonComplete(definition.stages, previousRunsByValidationId, staleByValidationId(previousRunsByValidationId))
+      const updatedRunsByValidationId = runByValidationId(updatedRuns)
+      const isCompleteNow = isLessonComplete(definition.stages, updatedRunsByValidationId, staleByValidationId(updatedRunsByValidationId))
+
+      if (!wasComplete && isCompleteNow && session) {
+        const checkpointRuns = checkpointStages.map((s) => updatedRunsByValidationId[s.checkpointValidationId!]).filter((r): r is ValidationRun => r !== undefined)
+        const attempt = createLessonAttemptFromCheckpointRuns({
+          lessonId,
+          lessonVersion: definition.version,
+          startedAt: session.startedAt,
+          runs: checkpointRuns,
+          hintsUsed: countRevealedHints(session),
+        })
+        void appendLessonAttempt(lessonId, attempt).then((updated) => setAttempts(updated))
+        persistSession(completeLessonSession(session))
+      }
+
+      return run
+    },
+    [definition.stages, definition.version, checkpointStages, checkpointTestCellsByValidationId, validationRuns, datasets, models, queries, queryEvaluations, session, lessonId, persistSession],
+  )
 
   /**
    * Clears this lesson's persisted notebook/session (and the dataset/model
@@ -216,9 +290,9 @@ export function useLessonWorkspace(lesson: BuiltInLesson) {
     progress,
     stageCompletion,
     lessonComplete,
-    checkpointTestCell,
-    checkpointRun,
-    checkpointStale,
+    checkpointTestCellsByValidationId,
+    checkpointRunsByValidationId,
+    checkpointStaleByValidationId,
     validationRuns,
     actions: {
       goToStage,

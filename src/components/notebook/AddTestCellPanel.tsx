@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import type { TestCell } from '../../domain/notebook'
+import type { TestCell, TestCellScope } from '../../domain/notebook'
 import type { SemanticModel } from '../../domain/model'
 import type { ValidationSpec } from '../../domain/validation'
 import { retailFoundationsValidationSpec } from '../../data/exercises/retailFoundationsValidation'
 
 interface AddTestCellPanelProps {
   models: Record<string, SemanticModel>
-  onCreate: (modelId: string, validation: ValidationSpec) => TestCell
+  onCreate: (scope: TestCellScope, validation: ValidationSpec) => TestCell
 }
 
 /**
@@ -32,7 +32,7 @@ export function AddTestCellPanel({ models, onCreate }: AddTestCellPanelProps) {
 
   function handleAdd() {
     const targetModelId = modelId || availableModels[0].id
-    onCreate(targetModelId, retailFoundationsValidationSpec)
+    onCreate({ kind: 'model', modelId: targetModelId }, retailFoundationsValidationSpec)
     setOpen(false)
     setModelId('')
   }

@@ -1,10 +1,15 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { DataColumn, DataType } from '../../../domain/data'
 import type {
+  ConditionalColumnClause,
   GroupByAggregationFunction,
   MergeJoinKind,
+  PivotAggregationFunction,
   QueryFilterOperator,
 } from '../../../domain/query'
+import { bindExpression } from '../../../runtime/query/expression/binder'
+import { ExpressionLexError } from '../../../runtime/query/expression/lexer'
+import { ExpressionParseError, parseExpression } from '../../../runtime/query/expression/parser'
 import type { NewStepInput } from '../../../runtime/query/queryStepFactory'
 
 const DATA_TYPES: DataType[] = ['string', 'integer', 'decimal', 'boolean', 'date', 'datetime']
@@ -23,6 +28,7 @@ const FILTER_OPERATORS: QueryFilterOperator[] = [
 ]
 const AGG_FUNCTIONS: GroupByAggregationFunction[] = ['count-rows', 'sum', 'average', 'min', 'max']
 const JOIN_KINDS: MergeJoinKind[] = ['inner', 'left-outer', 'right-outer', 'full-outer', 'left-anti', 'right-anti']
+const PIVOT_AGG_FUNCTIONS: PivotAggregationFunction[] = ['sum', 'count', 'min', 'max', 'first']
 
 interface FormProps {
   columns: DataColumn[]
@@ -606,6 +612,216 @@ export function AppendQueriesForm({ otherQueries, onSubmit, onCancel, currentCol
         >
           Apply
         </button>
+      </div>
+    </div>
+  )
+}
+
+export function PivotColumnForm({ columns, onSubmit, onCancel }: FormProps) {
+  const [pivotColumnId, setPivotColumnId] = useState('')
+  const [valueColumnId, setValueColumnId] = useState('')
+  const [aggregation, setAggregation] = useState<PivotAggregationFunction>('sum')
+  const valid = pivotColumnId && valueColumnId && pivotColumnId !== valueColumnId
+
+  return (
+    <div className="query-form">
+      <p className="query-form__hint">Pivot column (its values become new column names)</p>
+      <ColumnSelect columns={columns} value={pivotColumnId} onChange={setPivotColumnId} />
+      <p className="query-form__hint">Value column (aggregated into each new column)</p>
+      <ColumnSelect columns={columns} value={valueColumnId} onChange={setValueColumnId} />
+      <label>
+        Aggregation{' '}
+        <select value={aggregation} onChange={(e) => setAggregation(e.target.value as PivotAggregationFunction)}>
+          {PIVOT_AGG_FUNCTIONS.map((f) => (
+            <option key={f} value={f}>{f}</option>
+          ))}
+        </select>
+      </label>
+      <div className="query-form__actions">
+        <button type="button" className="secondary-button" onClick={onCancel}>Cancel</button>
+        <button type="button" className="primary-button" disabled={!valid} onClick={() => onSubmit({ kind: 'pivot-column', pivotColumnId, valueColumnId, aggregation })}>Apply</button>
+      </div>
+    </div>
+  )
+}
+
+export function UnpivotColumnsForm({ columns, onSubmit, onCancel }: FormProps) {
+  const [mode, setMode] = useState<'selected' | 'other-columns'>('selected')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [attributeColumnName, setAttributeColumnName] = useState('Attribute')
+  const [valueColumnName, setValueColumnName] = useState('Value')
+  const valid = selected.size > 0 && attributeColumnName.trim() && valueColumnName.trim() && attributeColumnName.trim() !== valueColumnName.trim()
+
+  return (
+    <div className="query-form">
+      <label>
+        Mode{' '}
+        <select value={mode} onChange={(e) => setMode(e.target.value as 'selected' | 'other-columns')}>
+          <option value="selected">Unpivot selected columns</option>
+          <option value="other-columns">Unpivot other columns (keep selected)</option>
+        </select>
+      </label>
+      <p className="query-form__hint">{mode === 'selected' ? 'Columns to unpivot' : 'Columns to keep as-is'}</p>
+      <ul className="query-form__checklist">
+        {columns.map((c) => (
+          <li key={c.id}>
+            <label>
+              <input
+                type="checkbox"
+                checked={selected.has(c.id)}
+                onChange={() =>
+                  setSelected((s) => {
+                    const next = new Set(s)
+                    if (next.has(c.id)) next.delete(c.id)
+                    else next.add(c.id)
+                    return next
+                  })
+                }
+              />
+              {c.name}
+            </label>
+          </li>
+        ))}
+      </ul>
+      <div className="query-form__row">
+        <input placeholder="Attribute column name" value={attributeColumnName} onChange={(e) => setAttributeColumnName(e.target.value)} />
+        <input placeholder="Value column name" value={valueColumnName} onChange={(e) => setValueColumnName(e.target.value)} />
+      </div>
+      <div className="query-form__actions">
+        <button type="button" className="secondary-button" onClick={onCancel}>Cancel</button>
+        <button
+          type="button"
+          className="primary-button"
+          disabled={!valid}
+          onClick={() => onSubmit({ kind: 'unpivot-columns', mode, columnIds: [...selected], attributeColumnName, valueColumnName })}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export function ConditionalColumnForm({ columns, onSubmit, onCancel }: FormProps) {
+  const [outputName, setOutputName] = useState('Column')
+  const [clauses, setClauses] = useState<ConditionalColumnClause[]>([{ columnId: '', operator: 'equals', value: '', result: '' }])
+  const [elseValue, setElseValue] = useState<string>('')
+  const valid = outputName.trim() && clauses.every((c) => c.columnId)
+
+  return (
+    <div className="query-form">
+      <input placeholder="New column name" value={outputName} onChange={(e) => setOutputName(e.target.value)} />
+      {clauses.map((clause, i) => (
+        <div className="query-form__row" key={i}>
+          <span>if</span>
+          <ColumnSelect columns={columns} value={clause.columnId} onChange={(id) => setClauses((cs) => cs.map((x, xi) => (xi === i ? { ...x, columnId: id } : x)))} />
+          <select value={clause.operator} onChange={(e) => setClauses((cs) => cs.map((x, xi) => (xi === i ? { ...x, operator: e.target.value as QueryFilterOperator } : x)))}>
+            {FILTER_OPERATORS.map((op) => (
+              <option key={op} value={op}>{op}</option>
+            ))}
+          </select>
+          {!NO_VALUE_OPERATORS.has(clause.operator) && (
+            <input placeholder="Value" value={String(clause.value ?? '')} onChange={(e) => setClauses((cs) => cs.map((x, xi) => (xi === i ? { ...x, value: coerceFormValue(e.target.value) } : x)))} />
+          )}
+          <span>then</span>
+          <input placeholder="Result" value={String(clause.result ?? '')} onChange={(e) => setClauses((cs) => cs.map((x, xi) => (xi === i ? { ...x, result: coerceFormValue(e.target.value) } : x)))} />
+        </div>
+      ))}
+      <button type="button" className="text-button" onClick={() => setClauses((cs) => [...cs, { columnId: '', operator: 'equals', value: '', result: '' }])}>+ Add clause (else if)</button>
+      <div className="query-form__row">
+        <span>else</span>
+        <input placeholder="Else value" value={elseValue} onChange={(e) => setElseValue(e.target.value)} />
+      </div>
+      <div className="query-form__actions">
+        <button type="button" className="secondary-button" onClick={onCancel}>Cancel</button>
+        <button
+          type="button"
+          className="primary-button"
+          disabled={!valid}
+          onClick={() => onSubmit({ kind: 'conditional-column', outputName, clauses, elseValue: coerceFormValue(elseValue) })}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  )
+}
+
+export function IndexColumnForm({ onSubmit, onCancel }: FormProps) {
+  const [outputName, setOutputName] = useState('Index')
+  const [start, setStart] = useState('0')
+  const [increment, setIncrement] = useState('1')
+  const startNum = Number(start)
+  const incrementNum = Number(increment)
+  const valid = outputName.trim() && Number.isFinite(startNum) && Number.isFinite(incrementNum) && incrementNum !== 0
+
+  return (
+    <div className="query-form">
+      <input placeholder="New column name" value={outputName} onChange={(e) => setOutputName(e.target.value)} />
+      <div className="query-form__row">
+        <label>
+          Start <input type="number" value={start} onChange={(e) => setStart(e.target.value)} />
+        </label>
+        <label>
+          Increment <input type="number" value={increment} onChange={(e) => setIncrement(e.target.value)} />
+        </label>
+      </div>
+      <div className="query-form__actions">
+        <button type="button" className="secondary-button" onClick={onCancel}>Cancel</button>
+        <button
+          type="button"
+          className="primary-button"
+          disabled={!valid}
+          onClick={() => onSubmit({ kind: 'index-column', outputName, start: startNum, increment: incrementNum })}
+        >
+          Apply
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The Custom Column editor: a plain textarea, not Monaco (brief §33 "A
+ * textarea/input with clear diagnostics is sufficient"). Parses+binds
+ * against the current columns on every keystroke purely for inline
+ * feedback — the actual parse/bind that determines correctness happens
+ * again, authoritatively, inside `steps/customColumn.ts` at evaluation
+ * time; this preview never becomes a second source of truth.
+ */
+export function CustomColumnForm({ columns, onSubmit, onCancel }: FormProps) {
+  const [outputName, setOutputName] = useState('Column')
+  const [expression, setExpression] = useState('')
+
+  const diagnostic = useMemo(() => {
+    if (expression.trim() === '') return undefined
+    try {
+      const ast = parseExpression(expression)
+      const { diagnostics } = bindExpression(ast, columns, 'preview')
+      return diagnostics.find((d) => d.severity === 'error')?.message
+    } catch (err) {
+      if (err instanceof ExpressionLexError || err instanceof ExpressionParseError) return err.message
+      return 'Could not parse this expression.'
+    }
+  }, [expression, columns])
+
+  const valid = outputName.trim() && expression.trim() !== '' && !diagnostic
+
+  return (
+    <div className="query-form">
+      <input placeholder="New column name" value={outputName} onChange={(e) => setOutputName(e.target.value)} />
+      <textarea
+        className="query-form__expression"
+        placeholder='[Quantity] * [UnitPrice]'
+        rows={3}
+        value={expression}
+        onChange={(e) => setExpression(e.target.value)}
+      />
+      {diagnostic && <p className="query-form__error">{diagnostic}</p>}
+      <p className="query-form__hint">Power Query expression subset — not full M. See docs/POWER_QUERY_EXPRESSIONS.md.</p>
+      <div className="query-form__actions">
+        <button type="button" className="secondary-button" onClick={onCancel}>Cancel</button>
+        <button type="button" className="primary-button" disabled={!valid} onClick={() => onSubmit({ kind: 'custom-column', outputName, expression })}>Apply</button>
       </div>
     </div>
   )

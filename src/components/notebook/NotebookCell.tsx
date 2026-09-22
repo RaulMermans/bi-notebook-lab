@@ -191,7 +191,7 @@ export function NotebookCell({
   }
 
   if (cell.kind === 'test') {
-    const model = models[cell.modelId]
+    const model = cell.scope.kind === 'model' ? models[cell.scope.modelId] : undefined
     return (
       <TestCellCard
         cell={cell}

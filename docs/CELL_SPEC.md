@@ -173,20 +173,27 @@ by a real domain/execution contract since Sprint 5 — see
 
 Contract (`src/domain/notebook.ts`):
 ```ts
+type TestCellScope = { kind: 'model'; modelId: string } | { kind: 'workspace' }
+
 interface TestCell extends BaseNotebookCell {
   kind: 'test'
-  modelId: string
+  scope: TestCellScope
   prompt?: string
   validation: ValidationSpec
 }
 ```
 `test` was removed from `GenericCellKind` — like `CalculatedColumnCell`/
-`MeasureCell`, it's now a fully typed cell. `modelId` and `validation` are
-always required (there is no draft `TestCell`), but unlike calculated
-columns/measures a `ValidationSpec` needs no create-time validation pass —
-it's authored data (a rule list + expected values), not an expression that
-can fail to parse/bind. `runtime/notebook/notebookRuntime.ts#createTestCell`
-appends the cell directly.
+`MeasureCell`, it's now a fully typed cell. `scope` (Sprint 14; was
+`modelId: string`) and `validation` are always required (there is no draft
+`TestCell`), but unlike calculated columns/measures a `ValidationSpec`
+needs no create-time validation pass — it's authored data (a rule list +
+expected values), not an expression that can fail to parse/bind.
+`{ kind: 'model' }` grades one `SemanticModel`, exactly as `modelId` always
+did; `{ kind: 'workspace' }` grades notebook state with no model at all —
+used by rules that target a Power Query `QueryDefinition` directly (see
+[`../docs/QUERY_VALIDATION.md`](../docs/QUERY_VALIDATION.md)).
+`runtime/notebook/notebookRuntime.ts#createTestCell(scope, validation,
+title?, prompt?)` appends the cell directly.
 
 Expected output:
 - a `ValidationRun` (score, per-rule status, feedback) — computed on demand

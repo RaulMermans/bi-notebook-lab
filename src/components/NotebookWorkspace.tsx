@@ -45,22 +45,21 @@ export function NotebookWorkspace() {
     for (const cell of testCells) {
       const run = validationRuns[cell.id]
       if (!run) continue
-      const model = models[cell.modelId]
-      if (model && !isValidationRunStale(run, model, datasets, cell.validation)) {
+      if (!isValidationRunStale(run, { models, datasets, queries, queryEvaluations }, cell)) {
         current[cell.id] = run
       } else {
         stale.add(cell.id)
       }
     }
     return { currentRuns: current, staleTestCellIds: stale }
-  }, [testCells, validationRuns, models, datasets])
+  }, [testCells, validationRuns, models, datasets, queries, queryEvaluations])
 
   const notebookScore = useMemo(() => computeNotebookScore(Object.values(currentRuns)), [currentRuns])
 
   function handleRunValidation(cellId: string) {
     const cell = notebook.cells.find((c) => c.id === cellId)
     if (!cell || cell.kind !== 'test') return
-    const run = runValidation({ datasets, models }, cell)
+    const run = runValidation({ datasets, models, queries, queryEvaluations }, cell)
     setValidationRuns((runs) => ({ ...runs, [cellId]: run }))
   }
 

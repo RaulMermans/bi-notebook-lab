@@ -21,7 +21,7 @@ Visuals
 This document covers the architecture: the domain contract, dependency
 graph, stable identity strategy, evaluation runtime, and the boundary
 between Power Query and the existing BI engine. See
-[`docs/APPLIED_STEPS.md`](./APPLIED_STEPS.md) for the fourteen step kinds
+[`docs/APPLIED_STEPS.md`](./APPLIED_STEPS.md) for the nineteen step kinds
 themselves and their per-step contracts/diagnostics.
 
 ## M-language boundary
@@ -34,10 +34,21 @@ anywhere in this codebase, and the DAX expression engine
 languages with different semantics. A `QueryStep` is data (a discriminated
 union with typed fields), not source code in any language. This also means:
 no Advanced Editor, no custom M functions, no query folding, no native-query
-inspection. See §92 of the sprint brief for the full out-of-scope list
-(connectors, parameters, dataflows, incremental refresh, Pivot/Unpivot,
-Conditional/Index/Custom columns, fuzzy merge, RLS, calculated tables — none
-of these exist yet).
+inspection.
+
+Sprint 14 adds Pivot Column, Unpivot Columns, Conditional Column, Index
+Column and Custom Column — all still typed Applied Steps, not M. Custom
+Column is the one step whose config carries free-form source text
+(`expression: string`), which could look like an M-boundary exception, so
+it's worth being explicit: that text is parsed and evaluated by an entirely
+separate, deliberately bounded scalar-expression subsystem under
+`src/runtime/query/expression/`, described fully in
+[`docs/POWER_QUERY_EXPRESSIONS.md`](./POWER_QUERY_EXPRESSIONS.md) — it is
+not M, it does not reuse `src/expression/*` (the DAX engine) either, and it
+supports none of `let/in`, records, lists, `each`, user-defined functions,
+external connectors, or query folding. See §92 of the sprint brief for the
+remaining out-of-scope list (connectors, parameters, dataflows, incremental
+refresh, fuzzy merge, RLS, calculated tables — none of these exist yet).
 
 ## Definitions vs. results
 
@@ -116,6 +127,101 @@ IDs during evaluation") and what lets Append's schema union
 (`AppendQueriesStep.columns: { name, outputColumnId }[]`) stay stable even
 though it's derived from other queries' schemas.
 
+## Pivot column identity (Sprint 14)
+
+Every other schema-generating step (Split Column, Merge Columns, Group By,
+Merge's expand columns, Append's schema union) follows the same rule
+described above: generate the output column id **once**, at step-creation
+time in `queryStepFactory.ts`, and persist it in the step's own config
+forever after. That rule assumes the step's output columns are knowable at
+creation time — and for every one of those steps, they are: Split Column
+always produces exactly two columns, Group By's aggregations are configured
+one at a time, and so on.
+
+Pivot Column breaks that assumption. Its output schema is **data-dependent**:
+if you pivot `Products[Category]` into columns, you get one output column
+per distinct category value *currently in the data* — a value the step's own
+config has no way to know at creation time, and which can change the moment
+an upstream step changes (a new category appears, an old one disappears).
+There is nothing to generate-once-and-persist, because there is no fixed
+set of output columns to generate ids for in the first place.
+
+The fix is `runtime/query/steps/pivotIdentity.ts#pivotOutputColumnId(stepId,
+canonicalKey)`:
+
+```ts
+export function pivotOutputColumnId(stepId: string, canonicalKey: string): string {
+  return `col_pivot_${hashString(`${stepId}::${canonicalKey}`)}`
+}
+```
+
+This is a **pure function**, not a generator. Given the same `stepId` and
+the same canonicalized pivot value, it returns the same id — on this
+evaluation, on the next one, on a hard reload, forever — with zero
+dependency on row order, how many times the pipeline has re-evaluated, or
+whether the value happened to appear before or after some other value in
+the current data. That is the entire trick: **identity is derived, not
+minted**. Contrast this with what it would look like if Pivot Column instead
+called `crypto.randomUUID()` (or `generateId()`) once per distinct value per
+evaluation — that *would* be "minting a new id every reevaluation," and it
+would break every downstream reference (a `SemanticModel.calculatedColumns`
+entry, a `Measure`, a validation rule's `QueryOutputColumnAssertion`) the
+moment the pipeline re-ran, even with byte-identical output. Because
+`pivotOutputColumnId` is pure, nothing about it needs to be persisted on the
+step at all — unlike Split/Merge/Group By's ids, which *must* be persisted
+precisely because they're randomly generated once. Pivot Column's config
+(`PivotColumnStep { pivotColumnId, valueColumnId, aggregation }`) is the one
+schema-generating step in the whole Applied Steps set that stores **no**
+output-column ids.
+
+Two supporting helpers, also in `pivotIdentity.ts`:
+
+- `canonicalPivotKey(value)` includes the JS type tag (`` `${typeof
+  value}:${String(value)}` ``) so the number `1` and the string `"1"` are
+  never folded into the same pivot bucket — `String(value)` alone would
+  collide them.
+- `pivotDisplayName(value)` is the human-facing column name shown to the
+  learner. Because it drops the type tag, two *distinct* canonical keys can
+  legitimately produce the same display name (`1` and `"1"` both display as
+  `"1"`) — `steps/pivotColumn.ts` detects this at evaluation time and fails
+  the step with `QUERY_PIVOT_SCHEMA_COLLISION` rather than silently
+  producing two columns named identically, or silently dropping one.
+
+`steps/pivotColumn.ts` itself is a single grouping pass (bucket rows by
+`canonicalPivotKey` of the pivot column) followed by one materialization
+pass (one output column per bucket, aggregated via `sum`/`count`/`min`/
+`max`/`first` over `valueColumnId`) — `QUERY_PIVOT_AGGREGATION_INVALID` for
+e.g. `sum` over a non-numeric column.
+
+## Sprint 14 step kinds
+
+Pivot Column, Unpivot Columns, Conditional Column, Index Column and Custom
+Column are documented per-step in
+[`docs/APPLIED_STEPS.md`](./APPLIED_STEPS.md). Two small shared modules
+extracted for them are worth calling out here because they cross step
+boundaries:
+
+- `runtime/query/steps/scalarMatch.ts` (`matchesOperator`/
+  `matchesCondition`/`compareScalars`/`isBlank`) is Filter Rows' comparison
+  logic, extracted so Conditional Column's clause matching reuses it
+  exactly rather than re-implementing "does this row's value satisfy this
+  `QueryFilterOperator`" a second time. `filterRows.ts` was refactored to
+  import from it; its behavior is unchanged.
+- `runtime/query/steps/inferOutputType.ts#inferOutputType` is shared by
+  Conditional Column and Custom Column: both produce a value per row from
+  heterogeneous branches/expressions rather than a single declared type, so
+  the output `DataType` is inferred from what was actually produced. A small
+  promotion lattice (`integer` + `decimal` → `decimal`) is allowed; any other
+  mix (e.g. text and numbers) fails explicitly
+  (`QUERY_CONDITIONAL_INVALID_RESULT_TYPE` /
+  `QUERY_CUSTOM_TYPE_ERROR`) rather than being silently coerced.
+
+Custom Column's own runtime — the lexer/parser/binder/evaluator pipeline
+under `runtime/query/expression/` — is documented in full in
+[`docs/POWER_QUERY_EXPRESSIONS.md`](./POWER_QUERY_EXPRESSIONS.md), including
+its "never `eval`/`new Function`" safety property and the exact supported
+grammar.
+
 ## Query dependency graph
 
 `runtime/query/queryGraph.ts#buildQueryGraph` walks every query's `source`
@@ -159,6 +265,16 @@ is query-sourced. Editing a query's filter threshold bumps `revision`,
 which bumps the validation fingerprint, which turns a previous PASS into
 STALE immediately — with zero query-specific logic anywhere else in the
 Validation Engine.
+
+**Sprint 14 addendum**: Direct Query Validation (a `TestCell` whose rules
+reference a query directly, not through a model table — see
+[`docs/QUERY_VALIDATION.md`](./QUERY_VALIDATION.md)) needed no new
+fingerprint mechanism either. `runtime/validation/fingerprint.ts` walks a
+spec's rules for every `QuerySelector` they reference and folds in that
+query's own `queryFingerprint.ts`-computed fingerprint directly — the exact
+same value already described above, just consumed one level earlier (a
+query-scoped rule doesn't go through a `Dataset.source.revision`
+indirection at all, since there's no `ModelTable` in between).
 
 ## Evaluation architecture
 

@@ -53,7 +53,9 @@ function categoryTotals(results: ValidationRuleResult[]): { earned: number; poss
 export function TestCellCard({ cell, model, run, hasStaleRun, onRun, onRemove }: TestCellCardProps) {
   const [expandedRuleId, setExpandedRuleId] = useState<string | null>(null)
 
-  if (!model) {
+  // A `'workspace'`-scoped checkpoint (Sprint 14) has no model by design — only a `'model'`-scoped
+  // checkpoint with no resolved model is a genuine "still loading / missing" state.
+  if (cell.scope.kind === 'model' && !model) {
     return (
       <article className="cell cell--missing">
         <div className="cell__rail">
