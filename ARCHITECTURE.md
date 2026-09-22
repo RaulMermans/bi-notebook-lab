@@ -74,17 +74,24 @@ Compares learner work against lesson expectations without relying on string equa
 
 ### `lessons`
 Portable lesson definitions: datasets, prompts, expected semantics and tests.
+Implemented (Sprint 13) as `src/domain/learning.ts` (contracts) +
+`src/data/lessons/` (the code-owned built-in lesson registry and each
+lesson's deterministic bootstrap) + `src/runtime/learning/` (session/
+progress orchestration, framework-free). See
+[`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md).
 
 ### `ui`
 Notebook editor and visual explanations. It consumes domain/runtime contracts; it does not implement BI logic.
 
 ## Persistence
 
-V1 should be local-first:
+Local-first, via IndexedDB (`idb-keyval`):
 
-- lesson definitions: JSON/TypeScript fixtures
-- learner notebooks: browser storage / local files
-- datasets: bundled CSV/XLSX or user-imported files
+- lesson definitions: TypeScript fixtures (`src/data/lessons/`), never persisted — code is the source of truth
+- the Free Lab notebook: one fixed-key document (`persistence/notebookStore.ts`)
+- a lesson's notebook/session/attempt history: keyed by lesson id (`persistence/learningStore.ts`, Sprint 13)
+- datasets/models: keyed by their own generated id (`notebookStore.ts`/`modelStore.ts`), shared by the Free Lab and every lesson
+- `ValidationRun` (current-state validation truth): never persisted, always recomputed
 
 A database is not required for the first usable version.
 
@@ -844,6 +851,58 @@ other `Dataset` (`docs/POWER_QUERY_RUNTIME.md` "Model integration
 boundary"). See [`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md)
 and [`docs/APPLIED_STEPS.md`](./docs/APPLIED_STEPS.md) for the full design,
 stable-identity strategy, and known Power Query compatibility boundaries.
+
+## Sprint 13 implementation (Learning System)
+
+```text
+src/domain/learning.ts              LessonDefinition/Stage/Hint/Solution,
+                                     LessonSession, LessonAttempt,
+                                     LessonProgressSummary (types only)
+src/data/lessons/
+  lessonRegistry.ts                  code-owned built-in lesson list
+  retailFoundationsLesson.ts         Lesson 1 (beginner)
+  filterContextLesson.ts             Lesson 2 (intermediate)
+  timeIntelligenceLesson.ts          Lesson 3 (intermediate)
+  support/retailModelBuilder.ts      shared deterministic Retail bootstrap
+                                      steps, driving the real NotebookRuntime
+src/data/exercises/
+  filterContextValidation.ts         new ValidationSpec (Lesson 2 checkpoint)
+  timeIntelligenceValidation.ts      new ValidationSpec (Lesson 3 checkpoint)
+  retailFoundationsValidation.ts     REUSED as-is (Lesson 1 checkpoint)
+src/runtime/learning/
+  lessonSession.ts                   pure session lifecycle functions
+  lessonProgress.ts                  stage/lesson completion, attempt
+                                      creation, progress aggregation
+  useLessonWorkspace.ts              React hook: wires useNotebookRuntime
+                                      (lesson-scoped) + session + progress
+  useLearningProgress.ts             React hook: attempt history for the
+                                      Progress dashboard
+src/persistence/learningStore.ts    LessonSession/LessonAttempt/lesson
+                                     notebook persistence (idb-keyval,
+                                     mirrors notebookStore.ts's pattern)
+src/components/
+  NotebookWorkspace.tsx              Free Lab, extracted verbatim from the
+                                      old App.tsx (unchanged behavior)
+  notebook/NotebookBody.tsx          shared cell-list + add-cell bar, used
+                                      by both NotebookWorkspace and
+                                      LessonWorkspace — one execution UI
+  learning/LessonCatalog.tsx         Exercises view
+  learning/LessonWorkspace.tsx       lesson header/stages/hints/checkpoint
+  learning/ProgressDashboard.tsx     Progress view
+App.tsx                             AppView routing ('notebook' |
+                                     'exercises' | 'progress'), no router
+```
+
+The one existing-runtime change: `runtime/notebook/useNotebookRuntime.ts`
+gained an optional `{ persistence, createInitialSnapshot }` parameter pair
+(both default to the Free Lab's original fixed-key behavior) so a lesson
+can reuse the exact same hook with its own persistence key and its own
+deterministic starting snapshot, instead of a parallel notebook-hydration
+implementation. Every other runtime file from Sprints 1–12 is untouched —
+the Learning System is additive orchestration, per the architectural rule
+above ("the same model can later power ... saved lessons"). See
+[`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md) for the full domain
+model, validation integration, and persistence/staleness boundaries.
 
 ## Expression strategy
 

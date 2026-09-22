@@ -468,17 +468,24 @@ details, architecture, and known Power Query compatibility boundaries
 
 ---
 
-## Phase 9 — Learning System
+## Phase 9 — Learning System ✅
 
-- lesson catalog
-- difficulty levels
-- progress
-- hints
-- reset/checkpoint
-- solution reveal
-- exercise history
+- lesson catalog ✅ (`LessonCatalog`, difficulty filter)
+- difficulty levels ✅ (beginner/intermediate/advanced on `LessonDefinition`)
+- progress ✅ (`ProgressDashboard`, `LessonAttempt` history, best score)
+- hints ✅ (progressive, authored, persisted per session)
+- reset/checkpoint ✅ (`Reset lesson`/`Start new attempt`; checkpoint via the
+  existing Validation Engine, never a second scoring implementation)
+- solution reveal ✅ (explanatory only — never mutates learner state)
+- exercise history ✅ (`LessonAttempt[]`, immutable, versioned)
 
-**Exit:** product works as a repeatable training environment.
+Three built-in lessons ship: **Retail Foundations** (beginner — star schema,
+calculated columns, measures), **Filter Context & CALCULATE**
+(intermediate), **Time Intelligence** (intermediate). See
+[`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md) for the full domain
+model, architecture, and persistence/staleness boundaries.
+
+**Exit:** product works as a repeatable training environment. ✅
 
 ---
 
@@ -496,15 +503,18 @@ details, architecture, and known Power Query compatibility boundaries
 
 ## Later, only if validated
 
-- **Advanced Power Query + M Fundamentals** (recommended next, now that
-  Phase 8.8's Query Runtime exists) — Pivot/Unpivot, Conditional Column,
-  Index Column, Custom Column, and basic/generated-M concepts, bounded to
-  the same typed-step architecture (still no arbitrary M interpreter).
-- **Calculated Tables & Advanced Model Objects** (the alternative Sprint 13
+- **Advanced Power Query + M Fundamentals** (candidate for Sprint 14, per
+  actual friction using the Learning System — Power Query has no built-in
+  lesson yet, deliberately: see docs/LEARNING_SYSTEM.md "Why no Power Query
+  lesson yet") — Pivot/Unpivot, Conditional Column, Index Column, Custom
+  Column, and basic/generated-M concepts, bounded to the same typed-step
+  architecture (still no arbitrary M interpreter).
+- **Calculated Tables & Advanced Model Objects** (the alternative Sprint 14
   candidate) — `CALENDAR`/`CALENDARAUTO`, `SELECTCOLUMNS`/`ADDCOLUMNS`,
   `SUMMARIZE`, and calculated tables built from DAX table expressions
   rather than an import/query. Reassess which gap matters more once the
-  Query Runtime has seen real use.
+  Learning System (Phase 9) has seen real repeated use — let observed
+  lesson-authoring friction pick the gap, not feature-completeness alone.
 - custom datasets
 - shareable notebooks
 - desktop wrapper

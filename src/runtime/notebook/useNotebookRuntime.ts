@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { CalculatedColumnCell, MeasureCell, ModelCell, NotebookCell, QueryCell, TestCell } from '../../domain/notebook'
+import type { CalculatedColumnCell, MeasureCell, ModelCell, NotebookCell, NotebookDocument, QueryCell, TestCell } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
 import type { ColumnRef, TableRef } from '../../domain/model'
 import type { ValidationSpec } from '../../domain/validation'
@@ -11,10 +11,41 @@ import type { CalculatedColumnInput } from '../calculatedColumn/calculatedColumn
 import type { MeasureInput } from '../measure/measureRuntime'
 import type { RelationshipConfigInput } from '../model/modelRuntime'
 import type { NewStepInput } from '../query/queryStepFactory'
+import type { NotebookRuntimeSnapshot } from './notebookRuntime'
 import type { DeleteQueryResult } from './notebookRuntime'
 import { NotebookRuntime, emptyNotebook } from './notebookRuntime'
 
 export type HydrationStatus = 'loading' | 'ready'
+
+/**
+ * How a `useNotebookRuntime` instance loads/saves its `NotebookDocument`.
+ * Defaults to the Free Lab's single fixed-key store (`notebookStore.ts`).
+ * The Learning System passes a lesson-scoped adapter instead
+ * (`persistence/learningStore.ts`) so a lesson's notebook is stored under
+ * its own key rather than overwriting the Free Lab notebook — see
+ * docs/LEARNING_SYSTEM.md "Free Lab boundary".
+ */
+export interface NotebookDocumentPersistence {
+  load(): Promise<NotebookDocument | undefined>
+  save(notebook: NotebookDocument): Promise<void>
+}
+
+const freeLabPersistence: NotebookDocumentPersistence = { load: loadNotebook, save: saveNotebook }
+
+export interface UseNotebookRuntimeOptions {
+  persistence?: NotebookDocumentPersistence
+  /**
+   * Produces the full starting snapshot (notebook + datasets + models) used
+   * the first time this notebook is opened (`persistence.load()` returns
+   * `undefined`). Defaults to an empty Free Lab notebook. A lesson passes
+   * its `BuiltInLesson.initialize()` here — the resulting datasets/models
+   * are seeded into the shared dataset/model stores exactly once, the same
+   * way importing a dataset or creating a model in the Free Lab would.
+   */
+  createInitialSnapshot?: () => InitialNotebookSnapshot
+}
+
+export type InitialNotebookSnapshot = Pick<NotebookRuntimeSnapshot, 'notebook' | 'datasets' | 'models'> & Partial<Pick<NotebookRuntimeSnapshot, 'queries'>>
 
 /**
  * Wires the framework-free NotebookRuntime to React state and to
@@ -24,7 +55,11 @@ export type HydrationStatus = 'loading' | 'ready'
  * than on every snapshot change, since their payloads shouldn't be
  * rewritten on unrelated notebook edits.
  */
-export function useNotebookRuntime() {
+export function useNotebookRuntime(options: UseNotebookRuntimeOptions = {}) {
+  const persistence = options.persistence ?? freeLabPersistence
+  const createInitialSnapshot: () => InitialNotebookSnapshot =
+    options.createInitialSnapshot ?? (() => ({ notebook: emptyNotebook('Retail Foundations'), datasets: {}, models: {} }))
+
   const runtimeRef = useRef<NotebookRuntime | null>(null)
   if (!runtimeRef.current) {
     runtimeRef.current = new NotebookRuntime({ notebook: emptyNotebook('Retail Foundations'), datasets: {}, models: {}, queries: {}, queryEvaluations: {} })
@@ -38,7 +73,7 @@ export function useNotebookRuntime() {
     let cancelled = false
 
     async function hydrate() {
-      const persisted = await loadNotebook()
+      const persisted = await persistence.load()
       if (cancelled) return
 
       if (persisted) {
@@ -56,6 +91,19 @@ export function useNotebookRuntime() {
         runtime.replaceAll({ notebook: persisted, datasets, models, queries, queryEvaluations: {} })
         // Query evaluations are never persisted (brief §52 hydration order) — recompute them once, after raw datasets/queries are in place.
         runtime.refreshQueries()
+      } else {
+        // Nothing persisted yet under this key — seed from the deterministic starting snapshot (Free Lab: empty; a lesson: its `initialize()` output) and persist it immediately so a reload finds the same state.
+        const initial = createInitialSnapshot()
+        const queries = initial.queries ?? {}
+        await Promise.all([
+          ...Object.values(initial.datasets).map((dataset) => saveDataset(dataset)),
+          ...Object.values(initial.models).map((model) => saveModel(model)),
+          ...Object.values(queries).map((query) => saveQuery(query)),
+          persistence.save(initial.notebook),
+        ])
+        if (cancelled) return
+        runtime.replaceAll({ notebook: initial.notebook, datasets: initial.datasets, models: initial.models, queries, queryEvaluations: {} })
+        runtime.refreshQueries()
       }
 
       setStatus('ready')
@@ -65,11 +113,13 @@ export function useNotebookRuntime() {
     return () => {
       cancelled = true
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `persistence`/`createInitialSnapshot` are expected to be stable for the lifetime of a given hook instance (a lesson workspace remounts via `key={lessonId}` instead of swapping them in place).
   }, [runtime])
 
   useEffect(() => {
     if (status !== 'ready') return
-    void saveNotebook(snapshot.notebook)
+    void persistence.save(snapshot.notebook)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapshot.notebook, status])
 
   const actions = useMemo(

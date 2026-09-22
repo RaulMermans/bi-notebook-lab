@@ -48,8 +48,9 @@ Sprint 5 (Validation Engine), Sprint 6 (Context Visualizer), Sprint 7
 (Visual Cells), Sprint 8 (`CALCULATE` & Filter Context Modification),
 Sprint 9 (Iterators, Table Expressions & Conditional Logic), Sprint 10
 (Date Tables & Classic Time Intelligence), Sprint 11 (Advanced
-Relationships & `USERELATIONSHIP`/`CROSSFILTER`) and Sprint 12 (Power
-Query & Data Transformation Runtime) are complete — the full MVP
+Relationships & `USERELATIONSHIP`/`CROSSFILTER`), Sprint 12 (Power
+Query & Data Transformation Runtime) and Sprint 13 (Learning System —
+lesson catalog, guided stages, hints, progress) are complete — the full MVP
 learning loop (import → model → calculated columns → measures → filter
 context manipulation → visualize → validate) now works end to end, with real
 row-iterating DAX (`SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX`), conditional
@@ -175,6 +176,20 @@ relationship model on top. This repository now contains:
   rebuild. See [`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md)
   and [`docs/APPLIED_STEPS.md`](./docs/APPLIED_STEPS.md).
 
+- **Learning System** — an `Exercises` catalog of built-in lessons
+  (**Retail Foundations**, **Filter Context & CALCULATE**, **Time
+  Intelligence**), each with a deterministic starting notebook, guided
+  stages with progressive hints and an on-demand solution, and a
+  checkpoint graded by the *exact same* Validation Engine a hand-built
+  `TestCell` uses — the Learning System adds zero new scoring logic. A
+  `Progress` view aggregates versioned, immutable attempt history (best
+  score, attempts, completion) separately from live validation truth, which
+  is still never persisted: reloading mid-lesson always requires
+  re-checking the checkpoint. The Free Lab (this notebook, with no lesson
+  selected) is completely unaffected — a lesson's notebook is persisted
+  under its own key. See
+  [`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md).
+
 Calendar-based (Auto date/time) time intelligence, `TREATAS`, composite
 models, full DAX compatibility, and an arbitrary Power Query M
 parser/interpreter (Sprint 12 implements typed Applied Steps, not M — see
@@ -294,6 +309,7 @@ match.
 - [`docs/USERELATIONSHIP.md`](./docs/USERELATIONSHIP.md)
 - [`docs/POWER_QUERY_RUNTIME.md`](./docs/POWER_QUERY_RUNTIME.md)
 - [`docs/APPLIED_STEPS.md`](./docs/APPLIED_STEPS.md)
+- [`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md)
 
 ## Scope guardrail
 

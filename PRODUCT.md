@@ -40,6 +40,28 @@ Receive validation
 Continue
 ```
 
+As of Sprint 13, this loop is wrapped by a repeatable outer one — choosing a
+lesson, working through stage guidance, and tracking progress across
+attempts — without changing anything about the loop itself:
+
+```text
+Choose lesson (Exercises)
+  ↓
+Understand objective (lesson header/stage)
+  ↓
+[ the core loop above, inside the same notebook cells ]
+  ↓
+Reach checkpoint → receive score + feedback → use hint if needed
+  ↓
+Complete lesson → record historical progress (Progress)
+  ↓
+Continue to next lesson
+```
+
+See [`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md) for the
+lesson/session/progress domain model. The Free Lab (no lesson selected)
+remains exactly the original core loop with no outer wrapper at all.
+
 ## Product principles
 
 1. **Teach mental models, not menu locations.**
@@ -63,6 +85,13 @@ V1 is complete when a learner can:
 - see filter context;
 - validate expected outputs and model structure;
 - complete a scored exercise.
+
+> Sprint 13 turns "open a lesson notebook" / "complete a scored exercise"
+> from a single hand-wired demo notebook into a real catalog: three
+> built-in lessons (`Exercises`), each with its own guided stages,
+> deterministic starting state, progressive hints, and a historical
+> `Progress` view across repeated attempts. See
+> [`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md).
 
 ## Explicit non-goals for V1
 

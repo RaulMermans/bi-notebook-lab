@@ -102,3 +102,29 @@ passes unfiltered but fails under a filter context is Level 4/5 feedback
 ("does your measure respond to the current filters?") — pointing the learner
 back at the specific mental model they haven't yet gotten right, instead of
 just reporting a score.
+
+## The Learning System as a sequencing layer over these levels
+
+Sprint 13's Learning System (see
+[`LEARNING_SYSTEM.md`](./LEARNING_SYSTEM.md)) doesn't add a new level — it
+sequences a learner's path *through* the levels above, one built-in lesson
+per span of levels:
+
+- **Retail Foundations** (beginner) walks Level 1 → Level 4: table grain,
+  star-schema modeling, a row-level calculated column, and the first
+  aggregate measures — ending with a checkpoint stage that specifically
+  proves Level 4/5 understanding ("Total Revenue responds to filter
+  context").
+- **Filter Context & CALCULATE** (intermediate) stays entirely at Level 5:
+  external filter context, same-column filter replacement, and
+  `REMOVEFILTERS`/`ALL`, using a Retail model whose Level 1–4 work is
+  already done.
+- **Time Intelligence** (intermediate) is Level 5 applied to a Date Table:
+  `SAMEPERIODLASTYEAR` and `DATESYTD`/`TOTALYTD` are both "what filter does
+  this introduce or remove," just automated over calendar shifts instead of
+  a manual `CALCULATE` filter argument.
+
+A lesson's `LessonStage.learningObjective` names the specific question from
+the level it's teaching (e.g. "Same-column filter replacement" for a Level 5
+stage) rather than a generic "step 3 of 5" label — the stage nav is a
+sequencing aid, not a substitute for naming the mental model being built.
