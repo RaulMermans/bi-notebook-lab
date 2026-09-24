@@ -99,7 +99,17 @@ export function addTable(model: SemanticModel, ref: TableRef): SemanticModel {
   return { ...model, tables: [...model.tables, modelTable], ...touch() }
 }
 
-/** Removes a table and any relationships (in either role), calculated columns or Date Table marking that reference it (docs/DATE_TABLES.md "Table removal cleanup" — no dangling `DateTableDefinition` may survive its `ModelTable`). */
+/**
+ * Removes a table and any relationships (in either role), calculated
+ * columns, measures homed on it, or Date Table marking that reference it
+ * (docs/DATE_TABLES.md "Table removal cleanup" — no dangling
+ * `DateTableDefinition` may survive its `ModelTable`; Sprint 15 extends this
+ * to measures — see docs/WORKSPACE_INTEGRITY.md "Remove Model Table": a
+ * measure's `homeModelTableId` can never point at a removed table, so it
+ * cascades away with the table rather than dangling). The caller
+ * (`NotebookRuntime.removeTableFromModel`) is responsible for also removing
+ * any cell that referenced a cascaded calculated column/measure.
+ */
 export function removeTable(model: SemanticModel, modelTableId: string): SemanticModel {
   const table = model.tables.find((t) => t.id === modelTableId)
   if (!table) return model
@@ -111,8 +121,9 @@ export function removeTable(model: SemanticModel, modelTableId: string): Semanti
       !(r.right.datasetId === table.datasetId && r.right.tableId === table.tableId),
   )
   const calculatedColumns = model.calculatedColumns.filter((c) => c.modelTableId !== modelTableId)
+  const measures = model.measures.filter((m) => m.homeModelTableId !== modelTableId)
   const dateTables = model.dateTables.filter((dt) => dt.modelTableId !== modelTableId)
-  return { ...model, tables, relationships, calculatedColumns, dateTables, ...touch() }
+  return { ...model, tables, relationships, calculatedColumns, measures, dateTables, ...touch() }
 }
 
 export function moveTable(model: SemanticModel, modelTableId: string, position: { x: number; y: number }): SemanticModel {

@@ -16,6 +16,16 @@ import type { DateTableDiagnostic } from '../dateTable/dateTableTypes'
 import * as queryRuntime from '../query/queryRuntime'
 import type { QueryEvaluationDetail } from '../query/queryRuntime'
 import type { NewStepInput } from '../query/queryStepFactory'
+import {
+  analyzeDeleteCalculatedColumn,
+  analyzeDeleteDataset,
+  analyzeDeleteMeasure,
+  analyzeDeleteModel,
+  analyzeDeleteQuery,
+  analyzeDisableQueryLoad,
+  analyzeRemoveModelTable,
+} from '../integrity/mutationImpact'
+import type { WorkspaceIntegrityIssue } from '../integrity/types'
 
 export interface NotebookRuntimeSnapshot {
   notebook: NotebookDocument
@@ -32,8 +42,34 @@ export interface DeleteQueryResult {
   deleted: boolean
   /** Other queries that reference this one (Merge/Append/source-of) — deletion is blocked while any exist (brief §82). */
   blockedByQueries: string[]
-  /** Models whose tables reference this query's output — informational; deletion still proceeds (brief §82 "warn clearly ... no silent cascading destruction"). */
+  /**
+   * Models whose tables reference this query's output. Sprint 15 (brief
+   * §38) tightens this from a soft warning to a hard block — a non-empty
+   * list means `deleted` is `false`, not just informational.
+   */
   referencedByModels: string[]
+}
+
+export interface RemovalResult {
+  removed: boolean
+  blockers?: WorkspaceIntegrityIssue[]
+}
+
+export interface UpdateResult {
+  updated: boolean
+  blockers?: WorkspaceIntegrityIssue[]
+}
+
+export interface RemoveModelResult {
+  removed: boolean
+  cascadedCellIds: string[]
+}
+
+export interface RemoveModelTableResult {
+  removed: boolean
+  cascadedCalculatedColumnIds: string[]
+  cascadedMeasureIds: string[]
+  cascadedCellIds: string[]
 }
 
 export function emptyNotebook(title = 'Untitled Notebook'): NotebookDocument {
@@ -169,12 +205,22 @@ export class NotebookRuntime {
     return cell
   }
 
-  /** Removes a dataset and any DataCells that reference it. */
-  removeDataset(datasetId: string): void {
+  /**
+   * Removes a dataset and any DataCells that reference it — blocked while a
+   * Query sources from it or a model has a table loaded from it (Sprint 15,
+   * brief §5 "Delete raw Dataset" — never silently orphan a query source or
+   * model table).
+   */
+  removeDataset(datasetId: string): RemovalResult {
+    if (!this.snapshot.datasets[datasetId]) return { removed: false }
+    const impact = analyzeDeleteDataset(this.snapshot, datasetId)
+    if (!impact.allowed) return { removed: false, blockers: impact.blockers }
+
     const cells = this.snapshot.notebook.cells.filter((cell) => !(cell.kind === 'data' && cell.datasetId === datasetId))
     const datasets = { ...this.snapshot.datasets }
     delete datasets[datasetId]
     this.commit({ ...this.snapshot.notebook, cells }, datasets)
+    return { removed: true }
   }
 
   /** Recomputes every query's evaluation and folds load-enabled outputs into `datasets`. Query evaluations are never persisted, so hydration calls this once after `replaceAll` loads the persisted `QueryDefinition`s (brief §52 hydration order). */
@@ -263,25 +309,48 @@ export class NotebookRuntime {
     this.reEvaluateQueries(queries)
   }
 
-  /** Toggling load off removes the query's output from `datasets` (so it can't be registered on a Semantic Model) but keeps it resolvable for sibling queries (brief §43). */
-  setQueryLoadEnabled(queryId: string, loadEnabled: boolean): void {
+  /**
+   * Toggling load off removes the query's output from `datasets` (so it
+   * can't be registered on a Semantic Model) but keeps it resolvable for
+   * sibling queries (brief §43) — blocked while a model currently uses the
+   * loaded output (Sprint 15, brief §39: never silently orphan the
+   * ModelTable). Enabling load is never blocked.
+   */
+  setQueryLoadEnabled(queryId: string, loadEnabled: boolean): UpdateResult {
     const query = this.getQuery(queryId)
-    if (!query) return
+    if (!query) return { updated: false }
+
+    if (!loadEnabled) {
+      const impact = analyzeDisableQueryLoad(this.snapshot, queryId)
+      if (!impact.allowed) return { updated: false, blockers: impact.blockers }
+    }
+
     const queries = { ...this.snapshot.queries, [queryId]: queryRuntime.setQueryLoadEnabled(query, loadEnabled) }
     this.reEvaluateQueries(queries)
+    return { updated: true }
   }
 
-  /** Fail-safe delete (brief §82): blocked while another query still depends on this one; only warns (and still proceeds) when a Semantic Model references its output. */
+  /**
+   * Fail-safe delete (brief §82, tightened by Sprint 15 brief §38): blocked
+   * while another query still depends on this one, OR while its output
+   * dataset is registered on a Semantic Model. Both cases are now a hard
+   * block — a model reference is no longer a soft warning that still lets
+   * deletion proceed, since that would orphan the model's `ModelTable`.
+   * Delegates the actual check to `analyzeDeleteQuery` (`integrity/
+   * mutationImpact.ts`), the same single-source-of-truth pattern every
+   * other destructive mutation below follows — `blockedByQueries`/
+   * `referencedByModels` are derived from its generic `blockers` list to
+   * preserve this method's existing public result shape.
+   */
   deleteQuery(queryId: string): DeleteQueryResult {
     const query = this.getQuery(queryId)
     if (!query) return { deleted: false, blockedByQueries: [], referencedByModels: [] }
 
-    const blockedByQueries = queryRuntime.findDependentQueryIds(this.snapshot.queries, queryId)
-    const referencedByModels = Object.values(this.snapshot.models)
-      .filter((model) => model.tables.some((t) => t.datasetId === query.outputDatasetId))
-      .map((model) => model.id)
+    const impact = analyzeDeleteQuery(this.snapshot, queryId)
+    const blockedByQueries = impact.blockers.filter((b) => b.referenceType === 'QUERY_IN_USE_BY_QUERY').map((b) => b.source.id)
+    const referencedByModels = impact.blockers.filter((b) => b.referenceType === 'QUERY_IN_USE_BY_MODEL').map((b) => b.source.id)
 
-    if (blockedByQueries.length > 0) {
+    if (!impact.allowed) {
       return { deleted: false, blockedByQueries, referencedByModels }
     }
 
@@ -294,7 +363,7 @@ export class NotebookRuntime {
     delete datasets[query.outputDatasetId]
     this.commit(this.snapshot.notebook, datasets, this.snapshot.models, this.snapshot.queries, this.snapshot.queryEvaluations)
 
-    return { deleted: true, blockedByQueries: [], referencedByModels }
+    return { deleted: true, blockedByQueries: [], referencedByModels: [] }
   }
 
   getModel(modelId: string): SemanticModel | undefined {
@@ -322,12 +391,23 @@ export class NotebookRuntime {
     return { cell, model }
   }
 
-  /** Removes a model and any ModelCells that reference it. */
-  removeModel(modelId: string): void {
-    const cells = this.snapshot.notebook.cells.filter((cell) => !(cell.kind === 'model' && cell.modelId === modelId))
+  /**
+   * Removes a model and cascades every cell owned by it — the ModelCell
+   * itself, plus every CalculatedColumnCell/MeasureCell/VisualCell and
+   * model-scoped TestCell for that model (Sprint 15, brief §5 "Delete
+   * Semantic Model": these are owned by the model, so they disappear
+   * together with it rather than becoming orphans).
+   */
+  removeModel(modelId: string): RemoveModelResult {
+    if (!this.snapshot.models[modelId]) return { removed: false, cascadedCellIds: [] }
+    const impact = analyzeDeleteModel(this.snapshot, modelId)
+
+    const cascadeIds = new Set(impact.cascadeCellIds)
+    const cells = this.snapshot.notebook.cells.filter((cell) => !cascadeIds.has(cell.id))
     const models = { ...this.snapshot.models }
     delete models[modelId]
     this.commit({ ...this.snapshot.notebook, cells }, this.snapshot.datasets, models)
+    return { removed: true, cascadedCellIds: impact.cascadeCellIds }
   }
 
   addTableToModel(modelId: string, ref: TableRef): void {
@@ -336,10 +416,29 @@ export class NotebookRuntime {
     this.commitModel(modelRuntime.addTable(model, ref))
   }
 
-  removeTableFromModel(modelId: string, modelTableId: string): void {
+  /**
+   * Removes a model table — cascading its relationships, calculated
+   * columns, Date Table marking (via `modelRuntime.removeTable`) and, per
+   * Sprint 15 (brief §5 "Remove Model Table"), any measure homed on it,
+   * plus the notebook cells (CalculatedColumnCell/MeasureCell/VisualCell)
+   * that referenced those cascaded definitions.
+   */
+  removeTableFromModel(modelId: string, modelTableId: string): RemoveModelTableResult {
     const model = this.getModel(modelId)
-    if (!model) return
-    this.commitModel(modelRuntime.removeTable(model, modelTableId))
+    if (!model) return { removed: false, cascadedCalculatedColumnIds: [], cascadedMeasureIds: [], cascadedCellIds: [] }
+
+    const impact = analyzeRemoveModelTable(this.snapshot, modelId, modelTableId)
+    const cascadeIds = new Set(impact.cascadeCellIds)
+    const cells = this.snapshot.notebook.cells.filter((cell) => !cascadeIds.has(cell.id))
+    const models = { ...this.snapshot.models, [model.id]: modelRuntime.removeTable(model, modelTableId) }
+    this.commit({ ...this.snapshot.notebook, cells }, this.snapshot.datasets, models)
+
+    return {
+      removed: true,
+      cascadedCalculatedColumnIds: impact.cascadeCalculatedColumnIds,
+      cascadedMeasureIds: impact.cascadeMeasureIds,
+      cascadedCellIds: impact.cascadeCellIds,
+    }
   }
 
   moveModelTable(modelId: string, modelTableId: string, position: { x: number; y: number }): void {
@@ -452,17 +551,28 @@ export class NotebookRuntime {
     return { calculatedColumn: result.calculatedColumn, execution: result.execution, diagnostics: result.diagnostics }
   }
 
-  /** Removes a CalculatedColumnCell and its underlying definition together. */
-  removeCalculatedColumnCell(cellId: string): void {
+  /**
+   * Removes a CalculatedColumnCell and its underlying definition together —
+   * blocked while a measure or another calculated column structurally
+   * references it by name (Sprint 15, brief §7: never knowingly leave
+   * broken learner work — see `expressionDependents.ts`).
+   */
+  removeCalculatedColumnCell(cellId: string): RemovalResult {
     const cell = this.snapshot.notebook.cells.find((c) => c.id === cellId)
-    if (!cell || cell.kind !== 'calculated-column') return
+    if (!cell || cell.kind !== 'calculated-column') return { removed: false }
 
     const model = this.getModel(cell.modelId)
+    if (model) {
+      const impact = analyzeDeleteCalculatedColumn(this.snapshot, cell.modelId, cell.calculatedColumnId)
+      if (!impact.allowed) return { removed: false, blockers: impact.blockers }
+    }
+
     const cells = this.snapshot.notebook.cells.filter((c) => c.id !== cellId)
     const models = model
       ? { ...this.snapshot.models, [model.id]: calculatedColumnRuntime.removeCalculatedColumn(model, cell.calculatedColumnId) }
       : this.snapshot.models
     this.commit({ ...this.snapshot.notebook, cells }, this.snapshot.datasets, models)
+    return { removed: true }
   }
 
   /**
@@ -520,15 +630,25 @@ export class NotebookRuntime {
     return { measure: result.measure, execution: result.execution, diagnostics: result.diagnostics }
   }
 
-  /** Removes a MeasureCell and its underlying definition together. */
-  removeMeasureCell(cellId: string): void {
+  /**
+   * Removes a MeasureCell and its underlying definition together — blocked
+   * while another measure depends on it or a VisualCell references it
+   * (Sprint 15, brief §6: restrict rather than silently delete).
+   */
+  removeMeasureCell(cellId: string): RemovalResult {
     const cell = this.snapshot.notebook.cells.find((c) => c.id === cellId)
-    if (!cell || cell.kind !== 'measure') return
+    if (!cell || cell.kind !== 'measure') return { removed: false }
 
     const model = this.getModel(cell.modelId)
+    if (model) {
+      const impact = analyzeDeleteMeasure(this.snapshot, cell.modelId, cell.measureId)
+      if (!impact.allowed) return { removed: false, blockers: impact.blockers }
+    }
+
     const cells = this.snapshot.notebook.cells.filter((c) => c.id !== cellId)
     const models = model ? { ...this.snapshot.models, [model.id]: measureRuntime.removeMeasure(model, cell.measureId) } : this.snapshot.models
     this.commit({ ...this.snapshot.notebook, cells }, this.snapshot.datasets, models)
+    return { removed: true }
   }
 
   /**

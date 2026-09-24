@@ -41,6 +41,14 @@ export type TraceNodeKind =
   | 'relationship-override'
   | 'userelationship'
   | 'crossfilter'
+  // Sprint 15 (VAR/RETURN) — a VAR block's trace wraps one 'variable-declaration'
+  // child per VAR (holding that declaration's own sub-trace, computed once)
+  // followed by the RETURN body's trace; 'variable-reference' is a plain leaf
+  // read with no children, since the computation already has its trace under
+  // the declaration. See docs/EXPRESSION_ENGINE.md "Variables".
+  | 'var-return'
+  | 'variable-declaration'
+  | 'variable-reference'
 
 export interface ExecutionTraceNode {
   kind: TraceNodeKind

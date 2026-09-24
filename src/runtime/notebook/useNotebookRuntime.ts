@@ -12,7 +12,7 @@ import type { MeasureInput } from '../measure/measureRuntime'
 import type { RelationshipConfigInput } from '../model/modelRuntime'
 import type { NewStepInput } from '../query/queryStepFactory'
 import type { NotebookRuntimeSnapshot } from './notebookRuntime'
-import type { DeleteQueryResult } from './notebookRuntime'
+import type { DeleteQueryResult, RemovalResult, RemoveModelResult, RemoveModelTableResult, UpdateResult } from './notebookRuntime'
 import { NotebookRuntime, emptyNotebook } from './notebookRuntime'
 
 export type HydrationStatus = 'loading' | 'ready'
@@ -128,9 +128,10 @@ export function useNotebookRuntime(options: UseNotebookRuntimeOptions = {}) {
         await saveDataset(dataset)
         return runtime.importDataset(dataset)
       },
-      async removeDataset(datasetId: string): Promise<void> {
-        runtime.removeDataset(datasetId)
-        await deleteDataset(datasetId)
+      async removeDataset(datasetId: string): Promise<RemovalResult> {
+        const result = runtime.removeDataset(datasetId)
+        if (result.removed) await deleteDataset(datasetId)
+        return result
       },
       renameNotebook(title: string): void {
         runtime.renameNotebook(title)
@@ -140,19 +141,21 @@ export function useNotebookRuntime(options: UseNotebookRuntimeOptions = {}) {
         await saveModel(model)
         return cell
       },
-      async removeModel(modelId: string): Promise<void> {
-        runtime.removeModel(modelId)
-        await deleteModel(modelId)
+      async removeModel(modelId: string): Promise<RemoveModelResult> {
+        const result = runtime.removeModel(modelId)
+        if (result.removed) await deleteModel(modelId)
+        return result
       },
       async addTableToModel(modelId: string, ref: TableRef): Promise<void> {
         runtime.addTableToModel(modelId, ref)
         const model = runtime.getModel(modelId)
         if (model) await saveModel(model)
       },
-      async removeTableFromModel(modelId: string, modelTableId: string): Promise<void> {
-        runtime.removeTableFromModel(modelId, modelTableId)
+      async removeTableFromModel(modelId: string, modelTableId: string): Promise<RemoveModelTableResult> {
+        const result = runtime.removeTableFromModel(modelId, modelTableId)
         const model = runtime.getModel(modelId)
         if (model) await saveModel(model)
+        return result
       },
       async moveModelTable(modelId: string, modelTableId: string, position: { x: number; y: number }): Promise<void> {
         runtime.moveModelTable(modelId, modelTableId, position)
@@ -205,15 +208,16 @@ export function useNotebookRuntime(options: UseNotebookRuntimeOptions = {}) {
         if (result.calculatedColumn && model) await saveModel(model)
         return result
       },
-      async removeCalculatedColumnCell(cellId: string): Promise<void> {
+      async removeCalculatedColumnCell(cellId: string): Promise<RemovalResult> {
         const cell = runtime.getSnapshot().notebook.cells.find(
           (c): c is CalculatedColumnCell => c.id === cellId && c.kind === 'calculated-column',
         )
-        runtime.removeCalculatedColumnCell(cellId)
-        if (cell) {
+        const result = runtime.removeCalculatedColumnCell(cellId)
+        if (result.removed && cell) {
           const model = runtime.getModel(cell.modelId)
           if (model) await saveModel(model)
         }
+        return result
       },
       async createMeasureCell(modelId: string, input: MeasureInput) {
         const result = runtime.createMeasureCell(modelId, input)
@@ -227,13 +231,14 @@ export function useNotebookRuntime(options: UseNotebookRuntimeOptions = {}) {
         if (result.measure && model) await saveModel(model)
         return result
       },
-      async removeMeasureCell(cellId: string): Promise<void> {
+      async removeMeasureCell(cellId: string): Promise<RemovalResult> {
         const cell = runtime.getSnapshot().notebook.cells.find((c): c is MeasureCell => c.id === cellId && c.kind === 'measure')
-        runtime.removeMeasureCell(cellId)
-        if (cell) {
+        const result = runtime.removeMeasureCell(cellId)
+        if (result.removed && cell) {
           const model = runtime.getModel(cell.modelId)
           if (model) await saveModel(model)
         }
+        return result
       },
       createTestCell(scope: TestCellScope, validation: ValidationSpec, title?: string, prompt?: string): TestCell {
         return runtime.createTestCell(scope, validation, title, prompt)
@@ -290,10 +295,13 @@ export function useNotebookRuntime(options: UseNotebookRuntimeOptions = {}) {
         const query = runtime.getQuery(queryId)
         if (query) await saveQuery(query)
       },
-      async setQueryLoadEnabled(queryId: string, loadEnabled: boolean): Promise<void> {
-        runtime.setQueryLoadEnabled(queryId, loadEnabled)
-        const query = runtime.getQuery(queryId)
-        if (query) await saveQuery(query)
+      async setQueryLoadEnabled(queryId: string, loadEnabled: boolean): Promise<UpdateResult> {
+        const result = runtime.setQueryLoadEnabled(queryId, loadEnabled)
+        if (result.updated) {
+          const query = runtime.getQuery(queryId)
+          if (query) await saveQuery(query)
+        }
+        return result
       },
       async deleteQuery(queryId: string): Promise<DeleteQueryResult> {
         const result = runtime.deleteQuery(queryId)

@@ -9,6 +9,7 @@ import {
   removeTable,
   setRelationshipActive,
 } from '../../../src/runtime/model/modelRuntime'
+import { createMeasure } from '../../../src/runtime/measure/measureRuntime'
 
 function fakeDataset(id: string, columnDataType: 'integer' | 'string' = 'integer'): Dataset {
   return {
@@ -106,6 +107,24 @@ describe('modelRuntime', () => {
 
     model = removeRelationship(model, relationshipId)
     expect(model.relationships).toHaveLength(0)
+  })
+
+  it('Sprint 15: removing a table cascades any measure homed on it (brief §5 "Remove Model Table")', () => {
+    const sales = fakeDataset('sales')
+    const datasets = { sales }
+
+    let model = createModel()
+    model = addTable(model, { datasetId: 'sales', tableId: 'sales-table' })
+    const salesTableId = model.tables[0].id
+
+    const result = createMeasure(model, datasets, { homeModelTableId: salesTableId, name: 'Total Key', expression: 'SUM(sales[Key])' })
+    expect(result.diagnostics).toEqual([])
+    model = result.model
+    expect(model.measures).toHaveLength(1)
+
+    model = removeTable(model, salesTableId)
+    expect(model.measures).toHaveLength(0)
+    expect(model.tables).toHaveLength(0)
   })
 
   it('does not apply a relationship that fails validation', () => {

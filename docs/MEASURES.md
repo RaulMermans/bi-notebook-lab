@@ -132,6 +132,10 @@ DIVIDE(a, b, alternate)      alternate if b is blank/0
 && ||                          logical composition (Sprint 8)
 CALCULATE(expr, filters...)   modifies the filter context (Sprint 8 — see docs/CALCULATE.md)
 FILTER / REMOVEFILTERS / ALL   CALCULATE filter modifiers only (Sprint 8)
+VAR ... RETURN ...            named intermediate values, scalar-only (Sprint 15 — see docs/EXPRESSION_ENGINE.md)
+ISBLANK(expr)                  true if expr is blank (Sprint 15)
+HASONEVALUE(Table[Column])     true if exactly one distinct value is visible (Sprint 15)
+KEEPFILTERS(Table[Column] = value)   bounded CALCULATE filter modifier — intersects instead of replaces (Sprint 15 — see docs/CALCULATE.md)
 ```
 
 All aggregations restrict themselves to rows visible under the current
@@ -163,7 +167,11 @@ also now support `IF`, `SWITCH`, `BLANK()` and `SELECTEDVALUE` — see
 intelligence (`SAMEPERIODLASTYEAR`, `DATEADD`, `PREVIOUSMONTH`,
 `PREVIOUSYEAR`, `DATESYTD`, `TOTALYTD`) is implemented as of Sprint 10 —
 see [`docs/TIME_INTELLIGENCE.md`](./TIME_INTELLIGENCE.md); calendar-based
-(Auto date/time) time intelligence remains out of scope.
+(Auto date/time) time intelligence remains out of scope. `VAR`/`RETURN`,
+`ISBLANK`, `HASONEVALUE` and a bounded `KEEPFILTERS` are implemented as of
+Sprint 15 — see "Variables (VAR/RETURN) (Sprint 15)" below,
+[`docs/EXPRESSION_ENGINE.md`](./EXPRESSION_ENGINE.md) and
+[`docs/CALCULATE.md`](./CALCULATE.md).
 
 ### Conditional logic and SELECTEDVALUE (Sprint 9)
 
@@ -184,6 +192,37 @@ shares its "distinct visible values" computation with `VALUES(Column)`
 mechanism — `SELECTEDVALUE(Customers[Country], "Multiple Countries")` is
 conceptually "if `COUNTROWS(VALUES(Customers[Country]))` = 1, return that one
 value, else the alternate."
+
+`HASONEVALUE(Table[Column])` (Sprint 15) answers the same underlying
+question as a boolean instead of returning the value itself — it shares the
+same `distinctVisibleValues` helper `SELECTEDVALUE` uses (factored out of
+`evaluateSelectedValue` in `measureEvaluator.ts` rather than duplicated) and
+returns `true` exactly when there is a single distinct visible value under
+the current FilterContext. It's measure-only, since it needs a
+`FilterContext` the way `SELECTEDVALUE` does.
+
+### Variables (VAR/RETURN) (Sprint 15)
+
+A measure's expression can declare named intermediate values with
+`VAR`/`RETURN` — see [`EXPRESSION_ENGINE.md`](./EXPRESSION_ENGINE.md)
+"Variables (VAR/RETURN)" for the full grammar, scoping rules, and scope
+boundary (it does not reach inside a `CALCULATE` filter-predicate argument
+or an iterator's row expression). This is purely additive — existing
+measures and examples on this page work exactly as before, and using `VAR`
+is never required.
+
+```DAX
+Gross Margin % =
+VAR Revenue = [Total Revenue]
+VAR Cost = [Total Cost]
+VAR Margin = Revenue - Cost
+RETURN DIVIDE(Margin, Revenue)
+```
+
+`Revenue` and `Cost` are each computed once and reused by name — `Margin`
+reads both without re-evaluating either — and `RETURN`'s `DIVIDE` reads
+`Margin`/`Revenue` the same way. Verified live in the browser against the
+built-in Retail sample.
 
 ## Measure references and dependencies
 

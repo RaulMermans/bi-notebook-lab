@@ -1,0 +1,108 @@
+import type { DaxConformanceCase } from '../../../src/conformance/types'
+import { buildSharedFixture } from './sharedFixture'
+
+const fixture = buildSharedFixture()
+
+/** Scalar arithmetic and comparison — no filter context, no row context dependency beyond literals/aggregations. */
+export const SCALAR_CASES: DaxConformanceCase[] = [
+  {
+    id: 'scalar-001',
+    category: 'Scalar arithmetic',
+    description: 'Operator precedence: multiplication before addition',
+    fixture,
+    expression: '2 + 3 * 4',
+    evaluationMode: 'measure',
+    expected: 14,
+    provenance: 'documented-dax-semantics',
+  },
+  {
+    id: 'scalar-002',
+    category: 'Scalar arithmetic',
+    description: 'Parentheses override default precedence',
+    fixture,
+    expression: '(2 + 3) * 4',
+    evaluationMode: 'measure',
+    expected: 20,
+    provenance: 'documented-dax-semantics',
+  },
+  {
+    id: 'scalar-003',
+    category: 'Scalar arithmetic',
+    description: 'Unary minus binds tighter than binary addition',
+    fixture,
+    expression: '-2 + 5',
+    evaluationMode: 'measure',
+    expected: 3,
+    provenance: 'documented-dax-semantics',
+  },
+  {
+    id: 'scalar-004',
+    category: 'Scalar arithmetic',
+    description: 'Division',
+    fixture,
+    expression: '10 / 4',
+    evaluationMode: 'measure',
+    expected: 2.5,
+    provenance: 'hand-calculated',
+  },
+  {
+    id: 'scalar-005',
+    category: 'Comparison behavior',
+    description: 'Numeric equality',
+    fixture,
+    expression: '5 = 5',
+    evaluationMode: 'measure',
+    expected: true,
+    provenance: 'documented-dax-semantics',
+  },
+  {
+    id: 'scalar-006',
+    category: 'Comparison behavior',
+    description: 'Greater-than on a false case',
+    fixture,
+    expression: '5 > 10',
+    evaluationMode: 'measure',
+    expected: false,
+    provenance: 'documented-dax-semantics',
+  },
+  {
+    id: 'scalar-007',
+    category: 'Comparison behavior',
+    description: 'String equality is case-sensitive exact match',
+    fixture,
+    expression: '"Spain" = "Spain"',
+    evaluationMode: 'measure',
+    expected: true,
+    provenance: 'documented-dax-semantics',
+  },
+  {
+    id: 'scalar-008',
+    category: 'Comparison behavior',
+    description: 'Logical AND short-circuits correctly',
+    fixture,
+    expression: '(1 = 1) && (2 = 3)',
+    evaluationMode: 'measure',
+    expected: false,
+    provenance: 'documented-dax-semantics',
+  },
+  {
+    id: 'scalar-009',
+    category: 'Row context',
+    description: 'A calculated column reads its own row via bracket syntax',
+    fixture,
+    expression: 'Sales[Revenue] - Sales[Cost]',
+    evaluationMode: 'calculated-column',
+    expected: 40, // row 0: Revenue 100, Cost 60
+    provenance: 'hand-calculated',
+  },
+  {
+    id: 'scalar-010',
+    category: 'Row context',
+    description: 'A calculated column can read a table-qualified column explicitly',
+    fixture,
+    expression: 'Sales[Quantity] * 2',
+    evaluationMode: 'calculated-column',
+    expected: 2, // row 0: Quantity 1
+    provenance: 'hand-calculated',
+  },
+]

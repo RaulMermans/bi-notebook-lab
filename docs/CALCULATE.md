@@ -124,13 +124,14 @@ Each filter argument is bound as one of:
 | `ALL(Table[Column])` | `RemoveColumns` (ALL ≈ remove filters, sprint brief §26) |
 | `ALL(Table)` | `RemoveTables` |
 
-`KEEPFILTERS`, `ALLEXCEPT`, `ALLSELECTED` and `CALCULATETABLE` are
-explicitly rejected with `UNSUPPORTED_FUNCTION` wherever they appear (as a
-CALCULATE filter argument or standalone) — never silently interpreted as
-ordinary filtering. **`USERELATIONSHIP` and `CROSSFILTER` are now supported**
-(Sprint 11) as a third filter-modifier row in the table above's family —
-see "Sprint 11 addendum" below and
-[`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md) for the full design.
+`ALLEXCEPT`, `ALLSELECTED` and `CALCULATETABLE` are explicitly rejected with
+`UNSUPPORTED_FUNCTION` wherever they appear (as a CALCULATE filter argument
+or standalone) — never silently interpreted as ordinary filtering.
+**`USERELATIONSHIP` and `CROSSFILTER` are now supported** (Sprint 11) as a
+third filter-modifier row in the table above's family — see "Sprint 11
+addendum" below and [`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md) for
+the full design. **`KEEPFILTERS` is now supported** (Sprint 15), bounded to
+a direct equality shape — see "KEEPFILTERS (Sprint 15)" below.
 
 ### Boolean filter argument rules (`src/runtime/measure/booleanFilter.ts`)
 
@@ -400,6 +401,72 @@ rules, the conflict-scope (sibling-relationship suppression) design, the
 `USERELATIONSHIP` + `SAMEPERIODLASTYEAR` composition walkthrough, and known
 boundaries.
 
+## KEEPFILTERS (Sprint 15)
+
+Real DAX's `KEEPFILTERS` changes a `CALCULATE` filter argument from its
+normal same-column **replace** behavior to same-column **intersect**.
+Sprint 15 implements this, deliberately bounded to the single shape a
+learner is most likely to reach for:
+
+```DAX
+KEEPFILTERS(Table[Column] = value)
+```
+
+Only a direct equality inside `KEEPFILTERS` is supported. Anything richer —
+a comparison other than `=`, a compound `&&`/`||` predicate — is rejected
+with `UNSUPPORTED_KEEPFILTERS_SHAPE` rather than silently falling back to
+plain replacement or misinterpreting the shape. `bindKeepFilters`
+(`src/expression/measureBinder.ts`) is a new case inside
+`bindCalculateFilterArgument`'s dispatch, checked *before* the pre-existing
+`UNSUPPORTED_CALCULATE_ADJACENT_FUNCTIONS` rejection set — that set still
+correctly rejects a **standalone** `KEEPFILTERS(...)` used outside
+`CALCULATE`; that generic-function-call path was deliberately left
+untouched.
+
+Implementation: a new optional `keepFilters?: boolean` flag on
+`ReplaceColumnFilterModifier` (`src/runtime/measure/contextModifier.ts`) —
+mirroring the pre-existing `PredicateFilterModifier.tableWide` flag
+precedent ("a flag on the modifier changes fold-in behavior," not a whole
+new `FilterModifier` kind). In `applyFilterModifier`'s `ReplaceColumnFilter`
+case, when the flag is set, it looks up any existing `ColumnFilter` on that
+column and **intersects** the value sets — reusing the exact same
+same-column intersection arithmetic `mergeFilterContexts` already
+implements in `filterContext.ts`, not a second implementation. When there is
+no pre-existing filter on that column, it behaves identically to a plain
+replace.
+
+**Verified live in the browser**, against the Retail sample, with an
+ambient `Customers[Country] = France` filter applied:
+
+```DAX
+CALCULATE([Total Revenue], Customers[Country] = "Spain")
+```
+
+returns Spain's revenue — plain replace, France is discarded outright —
+while
+
+```DAX
+CALCULATE([Total Revenue], KEEPFILTERS(Customers[Country] = "Spain"))
+```
+
+under the identical ambient filter returns BLANK: France ∩ Spain is empty,
+and the execution trace shows `Customers[Country]` equals narrowing 120 → 0
+rows.
+
+## Variables inside CALCULATE (Sprint 15)
+
+`VAR`/`RETURN` works around and inside a `CALCULATE` call — as the
+expression argument, or wrapping the whole `CALCULATE` call from outside —
+exactly like any other position the ordinary expression binder reaches. It
+does **not** work inside a `CALCULATE` filter-predicate argument itself
+(that's the separate, narrower `booleanFilter.ts` binder). See
+[`EXPRESSION_ENGINE.md`](./EXPRESSION_ENGINE.md) "Variables (VAR/RETURN)"
+for the full grammar, scoping rules, and the critical rule that a
+variable's value is captured once and is immune to a later `CALCULATE`
+context transition (verified live: `VAR Outer = [Total Revenue] RETURN
+CALCULATE(Outer, Customers[Country] = "Spain")` returns the full,
+unfiltered `Total Revenue`, not the Spain-filtered one).
+
 ## Execution trace (`src/expression/trace.ts`)
 
 Five new `TraceNodeKind`s, all real runtime output (never reconstructed from
@@ -531,11 +598,13 @@ everything or nothing.
   predicate selection**: removing any one of several columns a compound
   direct filter (`Price > 50 && Category = "X"`) referenced removes the
   *whole* resulting table selection, not just that column's contribution.
-- **No `KEEPFILTERS`, `ALLEXCEPT`, `ALLSELECTED`, `CALCULATETABLE`** —
-  explicitly rejected with `UNSUPPORTED_FUNCTION`, never silently
-  misinterpreted. **`USERELATIONSHIP`/`CROSSFILTER` are now implemented**
-  (Sprint 11) — see "Sprint 11 addendum" below and
-  [`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md).
+- **No `ALLEXCEPT`, `ALLSELECTED`, `CALCULATETABLE`** — explicitly rejected
+  with `UNSUPPORTED_FUNCTION`, never silently misinterpreted.
+  **`USERELATIONSHIP`/`CROSSFILTER` are now implemented** (Sprint 11) — see
+  "Sprint 11 addendum" below and
+  [`docs/USERELATIONSHIP.md`](./USERELATIONSHIP.md). **`KEEPFILTERS` is now
+  implemented** (Sprint 15), bounded to a direct equality shape — see
+  "KEEPFILTERS (Sprint 15)" below.
 - **Blank comparison semantics are simplified** — see "Boolean runtime"
   above; real DAX's blank-coercion rules (e.g. blank treated as 0 in some
   arithmetic contexts) are not replicated.

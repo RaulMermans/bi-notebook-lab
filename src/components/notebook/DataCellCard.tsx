@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { NotebookCell } from '../../domain/notebook'
 import { primaryTable, type Dataset } from '../../domain/data'
+import type { RemovalResult } from '../../runtime/notebook/notebookRuntime'
 import { TablePreview } from './TablePreview'
 import { TableProfile } from './TableProfile'
 import { TableSchema } from './TableSchema'
@@ -11,12 +12,24 @@ const TABS: Tab[] = ['preview', 'profile', 'schema']
 interface DataCellCardProps {
   cell: NotebookCell
   dataset: Dataset | undefined
-  onRemove: () => void
+  onRemove: () => Promise<RemovalResult>
   onTransformData: (tableId: string) => void
 }
 
 export function DataCellCard({ cell, dataset, onRemove, onTransformData }: DataCellCardProps) {
   const [activeTab, setActiveTab] = useState<Tab | null>(null)
+  const [removeWarning, setRemoveWarning] = useState<string | null>(null)
+
+  async function handleRemove() {
+    const result = await onRemove()
+    if (!result.removed) {
+      setRemoveWarning(
+        result.blockers && result.blockers.length > 0
+          ? `Can't remove this dataset: ${result.blockers.map((b) => b.reason).join(' ')}`
+          : "Can't remove this dataset.",
+      )
+    }
+  }
 
   if (!dataset) {
     return (
@@ -50,11 +63,13 @@ export function DataCellCard({ cell, dataset, onRemove, onTransformData }: DataC
             <button type="button" className="secondary-button" onClick={() => onTransformData(table.id)}>
               Transform Data
             </button>
-            <button type="button" className="text-button" onClick={onRemove}>
+            <button type="button" className="text-button" onClick={handleRemove}>
               Remove
             </button>
           </div>
         </div>
+
+        {removeWarning && <p className="import-panel__error" role="alert">{removeWarning}</p>}
 
         <ul className="column-summary">
           {table.columns.slice(0, 8).map((column) => (

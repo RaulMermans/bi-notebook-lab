@@ -571,27 +571,124 @@ model, architecture, and persistence/staleness boundaries.
 
 ---
 
-## Recommended Sprint 15 — V1 Authoring, UX Hardening & Release Readiness
+## Phase 11 — Workspace Referential Integrity, Essential DAX Closure & Semantic Conformance Suite ✅ complete
 
-Phase 8.9 (Sprint 14) closed the two candidates this section previously
-weighed against each other — Advanced Power Query shipped, and Direct Query
-Validation gave the Learning System a way to grade it directly. Between the
-runtime (Power Query, the full DAX subset, advanced relationships) and the
-learning surface (four lessons, multi-checkpoint grading, progress
-history), the product now has enough breadth for a serious V1 pass rather
-than another engine-capability sprint:
+> Referred to as "Sprint 15" in its own implementation brief.
 
-- an authoring path for new lessons/checkpoints (still code-owned
-  TypeScript per AGENTS.md — no JSON/DSL bundle format yet — but the
-  friction of writing `powerQueryLessonValidation.ts`-style specs by hand
-  is worth revisiting now that a 4th lesson exists as a template)
-- UX hardening across the Applied Steps UI, the Learning System, and the
-  Free Lab (the sprint briefs to date have repeatedly deferred "visual
-  polish before runtime correctness" — AGENTS.md — and a growing backlog of
-  that deferred work is now large enough to be its own sprint)
-- release-readiness housekeeping: the one pre-existing >500kB chunk-size
-  build warning, broader manual-verification coverage, and anything else
-  that would block calling this a shippable V1
+- **Workspace Referential Integrity** (`runtime/integrity/`): every
+  destructive `NotebookRuntime` mutation now enforces a RESTRICT/CASCADE
+  policy internally, before mutating, rather than trusting the UI to have
+  checked first —
+  - **CASCADE**: deleting a Model removes the `ModelCell` and every
+    `CalculatedColumnCell`/`MeasureCell`/`VisualCell`/model-scoped `TestCell`
+    it owns together; removing a Model Table cascades the calculated
+    columns/measures homed on it (closing a confirmed pre-Sprint-15 gap
+    where `modelRuntime.ts#removeTable` cleaned up relationships/calculated
+    columns/date tables but not measures) plus their cells and any
+    `VisualCell` that referenced those measures
+  - **RESTRICT**: deleting a Dataset/Query/Measure/Calculated Column, or
+    disabling a Query's load, is blocked with a specific reason
+    (`WorkspaceIntegrityIssue[]`) when something else still depends on it —
+    Query deletion's existing soft warning was tightened to a hard block
+  - `validateWorkspaceIntegrity(snapshot)` is the canonical guarantee: no
+    cell/model object/query can point at a deleted id after any successful
+    mutation (**structural** invalidity is now impossible). **Semantic**
+    invalidity — an expression referencing a since-renamed thing by name —
+    remains possible and stays the expression diagnostics' job, a
+    deliberate, documented boundary, not an oversight
+  - `expressionDependents.ts` finds calculated-column/measure dependents by
+    parsing the real expression AST (never regex, never the binder) and
+    matching on column name only — a documented, deliberately conservative
+    over-approximation
+  - `tests/support/expectWorkspaceIntegrity.ts` — `expectWorkspaceIntegrity(
+    snapshot).toBeValid()` — used after every destructive-mutation test
+    across the suite
+- **Essential DAX Closure**:
+  - `VAR`/`RETURN`, scalar-only and explicitly enforced (a table-producing
+    function or a bare table name as a VAR value is rejected with
+    `TABLE_VARIABLE_NOT_SUPPORTED`), with correct accumulating lexical
+    scope, forward-/self-reference rejection, and case-insensitive names.
+    No dedicated "variable reference" AST node exists — a bare name reuses
+    the pre-existing `TableReferenceNode`, and the binder decides whether
+    it's a variable, exactly mirroring how that node already worked for a
+    bare table argument. Verified live: a nested `CALCULATE` correctly
+    cannot retroactively change an already-captured `VAR`'s value. Works
+    anywhere the ordinary expression binder reaches (a measure's body,
+    `CALCULATE`'s expression argument, `IF`/`SWITCH` branches) — **not**
+    inside a `CALCULATE` filter predicate or an iterator's row expression,
+    a documented, bounded scope decision
+  - `ISBLANK(expr)` (calculated columns and measures)
+  - `HASONEVALUE(Table[Column])` (measures only, needs `FilterContext`),
+    sharing its distinct-visible-values computation with the pre-existing
+    `SELECTEDVALUE`
+  - Bounded `KEEPFILTERS(Table[Column] = value)` — same-column **intersect**
+    instead of `CALCULATE`'s normal same-column **replace**; any shape
+    beyond a direct equality is rejected with `UNSUPPORTED_KEEPFILTERS_SHAPE`
+    rather than silently misinterpreted. Verified live: under an ambient
+    `Country = France` filter, plain `CALCULATE(..., Country = "Spain")`
+    returns Spain (replace), while `CALCULATE(..., KEEPFILTERS(Country =
+    "Spain"))` returns BLANK (France ∩ Spain = empty)
+  - A real trace-tree bug (a `VariableReference` re-embedding its full
+    original sub-trace on every reference instead of a lean cached-value
+    leaf) was found and fixed during manual browser verification — see
+    [`docs/EXPRESSION_ENGINE.md`](./docs/EXPRESSION_ENGINE.md)
+- **Semantic Conformance Suite** (`src/conformance/`): 83 hand-verified DAX
+  cases across 10 families (scalar, blanks, variables, aggregations, filter
+  context, `CALCULATE`, iterators, relationships, time intelligence,
+  advanced relationships), run through the *real* public runtime APIs
+  (`createMeasure`/`evaluateMeasure`, `createCalculatedColumn`) and compared
+  with the pre-existing tolerance-aware `compareScalar` — never a private
+  helper, never a second calculation oracle. Every case carries an honest
+  `provenance` (`hand-calculated` or `documented-dax-semantics`; **zero**
+  cases in this initial corpus claim `power-bi-verified`). One documented
+  `knownDivergence` (`blank-008`: `BLANK() + 5` — real DAX coerces blank to
+  0 for `+`; this codebase's arithmetic propagates blank through every
+  operator uniformly, a pre-existing Sprint 3/4 behavior surfaced, not
+  fixed, by this suite) reports via `it.skip`, never silently passed. Run
+  with `npm run conformance`
+- 113 test files / 1005 tests (1004 passed + 1 skipped known-divergence),
+  up from Sprint 14's 106 files / 857 tests — every pre-existing Sprint
+  1-14 test remains green, zero rewritten to accommodate new behavior
+
+**Exit:** a learner's workspace can no longer be left pointing at something
+that was deleted out from under it, the DAX subset covers the small set of
+constructs most learners reach for next (variables, `ISBLANK`,
+`HASONEVALUE`, `KEEPFILTERS`), and the runtime now has an independent,
+honestly-labeled correctness corpus proving the supported subset behaves
+the way real DAX does — not just the way the unit tests were written to
+expect. See [`docs/WORKSPACE_INTEGRITY.md`](./docs/WORKSPACE_INTEGRITY.md),
+[`docs/SEMANTIC_CONFORMANCE.md`](./docs/SEMANTIC_CONFORMANCE.md),
+[`docs/EXPRESSION_ENGINE.md`](./docs/EXPRESSION_ENGINE.md),
+[`docs/MEASURES.md`](./docs/MEASURES.md) and
+[`docs/CALCULATE.md`](./docs/CALCULATE.md) for implementation details.
+
+---
+
+## Recommended Sprint 16 — Practice UX, Performance & GitHub Release Readiness
+
+Phase 11 (Sprint 15) closed the two candidates this section previously
+weighed against each other — workspace mutations can no longer corrupt a
+learner's notebook, and the DAX subset's most commonly-missing constructs
+(`VAR`/`RETURN`, `ISBLANK`, `HASONEVALUE`, bounded `KEEPFILTERS`) are in,
+backed by an honestly-labeled conformance corpus rather than just unit
+tests. Between the runtime (Power Query, the full DAX subset, advanced
+relationships, workspace integrity) and the learning surface (four lessons,
+multi-checkpoint grading, progress history), the product now has enough
+breadth and enough safety guarantees to prepare for an actual public
+release rather than another engine-capability sprint:
+
+- portable notebook/project import-export (so a learner's work — or a
+  built exercise — can leave IndexedDB and be shared as a file)
+- performance profiling across the runtime and UI, and the one
+  pre-existing >500kB chunk-size build warning
+- sample practice notebooks and an onboarding pass for a first-time visitor
+  landing on the Free Lab with no context
+- UX/error-state cleanup across the Applied Steps UI, the Learning System,
+  and the Free Lab (the sprint briefs to date have repeatedly deferred
+  "visual polish before runtime correctness" — AGENTS.md — and a growing
+  backlog of that deferred work is now large enough to be its own sprint)
+- a production build/chunk cleanup pass and an E2E release suite
+- README/demo/screenshots and public GitHub prep
 
 **Only Calculated Tables** (`CALENDAR`/`CALENDARAUTO`,
 `SELECTCOLUMNS`/`ADDCOLUMNS`, `SUMMARIZE`, and calculated tables built from

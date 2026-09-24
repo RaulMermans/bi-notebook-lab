@@ -83,6 +83,19 @@ interface MeasureEvalContext {
   visiting: Set<string>
   /** Shared across every nested scope — a column's raw values don't depend on filter context, only which row *indexes* are visible does. */
   columnValuesCache: Map<string, unknown[]>
+  /**
+   * Sprint 15 (VAR/RETURN). Variables visible at this point, keyed
+   * lowercase, evaluated exactly once (cached `NodeResult`). Unlike `cache`,
+   * this is **carried through unchanged** into a nested `CALCULATE` scope
+   * (`evaluateCalculate`'s `calcCtx`) — a DAX variable is captured once at
+   * declaration and stays immune to later context transition, so a `VAR`
+   * declared outside a `CALCULATE(...)` call must still resolve to the
+   * *outer* context's value when referenced inside it. `evaluateMeasureById`
+   * resets this to a fresh empty map before evaluating a *different*
+   * measure's own expression tree — each measure's VAR scope is its own,
+   * never leaked from whichever measure referenced it.
+   */
+  variables: Map<string, NodeResult>
 }
 
 function formatValue(value: unknown): string {
@@ -158,7 +171,10 @@ function evaluateMeasureById(measureId: string, ctx: MeasureEvalContext): NodeRe
     if (!bound.bound) {
       result = { value: null, trace: { kind: 'measure-reference', label: `[${measure.name}]`, value: null }, diagnostics: bound.diagnostics }
     } else {
-      const evaluated = evaluateNode(bound.bound, ctx)
+      // Sprint 15: each measure's own VAR scope is independent — never leak
+      // the *referencing* measure's (or iterator row's) variables into this
+      // measure's own expression tree.
+      const evaluated = evaluateNode(bound.bound, { ...ctx, variables: new Map() })
       result = {
         value: evaluated.value,
         trace: { kind: 'measure-reference', label: `[${measure.name}]`, value: evaluated.value, children: [evaluated.trace] },
@@ -399,7 +415,81 @@ function evaluateNode(node: BoundMeasureExpression, ctx: MeasureEvalContext): No
         },
       }
     }
+
+    case 'IsBlank': {
+      const operand = evaluateNode(node.operand, ctx)
+      const value = operand.value === null || operand.value === undefined
+      return {
+        value,
+        diagnostics: operand.diagnostics,
+        trace: { kind: 'unary-operation', label: `ISBLANK(${formatValue(operand.value)})`, value, children: [operand.trace] },
+      }
+    }
+
+    case 'HasOneValue': {
+      const distinctValues = distinctVisibleValues(ctx, node.modelTableId, node.columnName)
+      const value = distinctValues.length === 1
+      return {
+        value,
+        diagnostics: [],
+        trace: {
+          kind: 'aggregation',
+          label: `HASONEVALUE(${node.tableName}[${node.columnName}])`,
+          value,
+          metadata: { distinctVisibleValues: distinctValues.length },
+        },
+      }
+    }
+
+    case 'VariableReference': {
+      const result = ctx.variables.get(node.name.toLowerCase())
+      if (!result) return { value: null, diagnostics: [], trace: { kind: 'variable-reference', label: node.name, value: null } }
+      // Reuse the cached value/diagnostics (evaluated once) but replace the
+      // trace with a lean leaf — the expensive computation's own trace
+      // already lives under the declaration node, so it must not be
+      // duplicated into the tree on every reference.
+      return { ...result, trace: { kind: 'variable-reference', label: node.name, value: result.value } }
+    }
+
+    case 'VarReturn': {
+      let variables = ctx.variables
+      const declarationTraces: ExecutionTraceNode[] = []
+      for (const decl of node.variables) {
+        const result = evaluateNode(decl.value, { ...ctx, variables })
+        variables = new Map(variables)
+        variables.set(decl.name.toLowerCase(), result)
+        declarationTraces.push({ kind: 'variable-declaration', label: decl.name, value: result.value, children: [result.trace] })
+      }
+      const body = evaluateNode(node.body, { ...ctx, variables })
+      return {
+        value: body.value,
+        diagnostics: body.diagnostics,
+        effectiveFilterState: body.effectiveFilterState,
+        trace: { kind: 'var-return', label: 'VAR/RETURN', value: body.value, children: [...declarationTraces, body.trace] },
+      }
+    }
   }
+}
+
+/** The "exactly one distinct visible value" computation shared by `SELECTEDVALUE` and `HASONEVALUE` (Sprint 15) — see `evaluateSelectedValue`. */
+function distinctVisibleValues(ctx: MeasureEvalContext, modelTableId: string, columnName: string): unknown[] {
+  const modelTable = ctx.model.tables.find((t) => t.id === modelTableId)
+  const resolved = modelTable ? resolveTableRef(ctx.datasets, modelTable) : undefined
+  if (!resolved) return []
+
+  const totalRows = resolved.table.rowCount
+  const visible = visibleRowIndices(ctx.filterState, modelTableId, totalRows)
+
+  const seen = new Set<unknown>()
+  const distinctValues: unknown[] = []
+  for (const rowIndex of visible) {
+    const value = resolved.table.rows[rowIndex][columnName] ?? null
+    if (!seen.has(value)) {
+      seen.add(value)
+      distinctValues.push(value)
+    }
+  }
+  return distinctValues
 }
 
 /**
@@ -468,6 +558,10 @@ function evaluateCalculate(
     cache: new Map(),
     visiting: ctx.visiting,
     columnValuesCache: ctx.columnValuesCache,
+    // Sprint 15: carried through UNCHANGED (unlike `cache`) — a VAR declared
+    // outside this CALCULATE must still resolve to the outer context's
+    // value when referenced inside it.
+    variables: ctx.variables,
   }
 
   const inner = evaluateNode(node.expression, calcCtx)
@@ -531,23 +625,7 @@ function buildModifierTraceNode(outcome: ReturnType<typeof applyFilterModifier>)
  * value-resolution mechanism.
  */
 function evaluateSelectedValue(node: Extract<BoundMeasureExpression, { kind: 'SelectedValue' }>, ctx: MeasureEvalContext): NodeResult {
-  const modelTable = ctx.model.tables.find((t) => t.id === node.modelTableId)
-  const resolved = modelTable ? resolveTableRef(ctx.datasets, modelTable) : undefined
-  const totalRows = resolved?.table.rowCount ?? 0
-  const visible = visibleRowIndices(ctx.filterState, node.modelTableId, totalRows)
-
-  const seen = new Set<unknown>()
-  const distinctValues: unknown[] = []
-  if (resolved) {
-    for (const rowIndex of visible) {
-      const value = resolved.table.rows[rowIndex][node.columnName] ?? null
-      if (!seen.has(value)) {
-        seen.add(value)
-        distinctValues.push(value)
-      }
-    }
-  }
-
+  const distinctValues = distinctVisibleValues(ctx, node.modelTableId, node.columnName)
   const label = `SELECTEDVALUE(${node.tableName}[${node.columnName}])`
   if (distinctValues.length === 1) {
     return { value: distinctValues[0], diagnostics: [], trace: { kind: 'aggregation', label, value: distinctValues[0], metadata: { distinctVisibleValues: 1 } } }
@@ -717,6 +795,9 @@ function evaluateIteratorMeasureReference(
     cache: new Map(),
     visiting: ctx.visiting,
     columnValuesCache: ctx.columnValuesCache,
+    // Irrelevant here: `evaluateMeasureById` always evaluates the
+    // referenced measure's own expression under a fresh, isolated scope.
+    variables: ctx.variables,
   }
 
   const result = evaluateMeasureById(measureId, nestedCtx)
@@ -765,6 +846,7 @@ export function evaluateMeasure(
     cache: new Map(),
     visiting: new Set(),
     columnValuesCache: new Map(),
+    variables: new Map(),
   }
 
   const result = evaluateMeasureById(measureId, ctx)

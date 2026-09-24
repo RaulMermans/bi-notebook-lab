@@ -3,6 +3,7 @@ import type { Dataset } from '../../src/domain/data'
 import { NotebookRuntime, emptyNotebook } from '../../src/runtime/notebook/notebookRuntime'
 import { createMeasure, evaluateMeasure } from '../../src/runtime/measure/measureRuntime'
 import { addTable, createModel } from '../../src/runtime/model/modelRuntime'
+import { expectWorkspaceIntegrity } from '../support/expectWorkspaceIntegrity'
 
 function salesDataset(): Dataset {
   return {
@@ -149,5 +150,36 @@ describe('NotebookRuntime query integration', () => {
     const measure = model.measures[0]
     const rerun = evaluateMeasure(model, runtime.getSnapshot().datasets, measure.id)
     expect(rerun.value).toBe(500)
+  })
+
+  // --- Sprint 15: Workspace Referential Integrity regressions ---
+
+  it('Sprint 15: blocks deleting a query whose output is registered in a model (brief §38, tightened from a soft warning)', () => {
+    const runtime = freshRuntime({ 'sales-ds': salesDataset() })
+    const { query } = runtime.createQueryFromDataset('sales-ds', 'sales-table')
+    const { model } = runtime.createModelCell('Retail')
+    runtime.addTableToModel(model.id, { datasetId: query.outputDatasetId, tableId: query.outputTableId })
+
+    const result = runtime.deleteQuery(query.id)
+
+    expect(result.deleted).toBe(false)
+    expect(result.referencedByModels).toEqual([model.id])
+    expect(runtime.getQuery(query.id)).toBeDefined()
+    expect(runtime.getSnapshot().datasets[query.outputDatasetId]).toBeDefined()
+    expectWorkspaceIntegrity(runtime.getSnapshot()).toBeValid()
+  })
+
+  it('Sprint 15: blocks disabling load on a query whose output is registered in a model (brief §39)', () => {
+    const runtime = freshRuntime({ 'sales-ds': salesDataset() })
+    const { query } = runtime.createQueryFromDataset('sales-ds', 'sales-table')
+    const { model } = runtime.createModelCell('Retail')
+    runtime.addTableToModel(model.id, { datasetId: query.outputDatasetId, tableId: query.outputTableId })
+
+    const result = runtime.setQueryLoadEnabled(query.id, false)
+
+    expect(result.updated).toBe(false)
+    expect(runtime.getQuery(query.id)!.loadEnabled).toBe(true)
+    expect(runtime.getSnapshot().datasets[query.outputDatasetId]).toBeDefined()
+    expectWorkspaceIntegrity(runtime.getSnapshot()).toBeValid()
   })
 })

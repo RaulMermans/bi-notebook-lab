@@ -228,4 +228,21 @@ describe('bind', () => {
     expect(result.diagnostics).toEqual([])
     expect(result.bound).toEqual(expect.objectContaining({ kind: 'Comparison', operator: '>' }))
   })
+
+  it('Sprint 15: binds ISBLANK in a calculated column', () => {
+    const { model, datasets, salesTableId } = baseModel()
+    const parsed = parseExpression('ISBLANK(Sales[Revenue])')
+    const result = bind(parsed.expression!, { model, datasets, currentModelTableId: salesTableId })
+
+    expect(result.diagnostics).toEqual([])
+    expect(result.bound).toMatchObject({ kind: 'IsBlank' })
+  })
+
+  it('Sprint 15: rejects ISBLANK with the wrong arity', () => {
+    const { model, datasets, salesTableId } = baseModel()
+    const parsed = parseExpression('ISBLANK(Sales[Revenue], Sales[Cost])')
+    const result = bind(parsed.expression!, { model, datasets, currentModelTableId: salesTableId })
+
+    expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'INVALID_FUNCTION_ARGUMENT' })])
+  })
 })

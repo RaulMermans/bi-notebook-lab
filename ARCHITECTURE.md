@@ -66,6 +66,20 @@ Canonical contracts for notebooks, cells, datasets, models, measures and executi
 ### `runtime`
 Executes notebook cells in dependency order and stores outputs.
 
+### `runtime/integrity`
+Workspace referential integrity (Sprint 15): pure functions that check every
+structural reference a notebook cell/model object/query claims, and a
+pre-mutation impact analysis (RESTRICT vs. CASCADE) that every destructive
+`NotebookRuntime` mutation method calls internally before mutating. See
+[`docs/WORKSPACE_INTEGRITY.md`](./docs/WORKSPACE_INTEGRITY.md).
+
+### `conformance`
+The Semantic Conformance Suite (Sprint 15): a corpus of hand-verified DAX
+cases run through the real public runtime APIs, independent of the
+unit/integration test suite, answering "is the supported DAX subset actually
+correct" rather than "does the code do what the tests told it to." See
+[`docs/SEMANTIC_CONFORMANCE.md`](./docs/SEMANTIC_CONFORMANCE.md).
+
 ### `semantic-core`
 Represents tables, relationships, row context, filter context and expression evaluation.
 
@@ -1080,6 +1094,187 @@ the model layer. See
 [`docs/POWER_QUERY_EXPRESSIONS.md`](./docs/POWER_QUERY_EXPRESSIONS.md),
 [`docs/QUERY_VALIDATION.md`](./docs/QUERY_VALIDATION.md) and
 [`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md) for the full design.
+
+## Sprint 15 implementation (Workspace Referential Integrity, Essential DAX Closure & Semantic Conformance Suite)
+
+New files:
+
+```text
+runtime/integrity/
+  types.ts                    WorkspaceRef, WorkspaceIntegrityIssue,
+                                 WorkspaceIntegrityReport — mirrors the
+                                 {severity, code, message, details?} shape
+                                 RelationshipDiagnostic/QueryDiagnostic/
+                                 ExpressionDiagnostic already use
+  workspaceReferences.ts      cellReferenceIssues/modelReferenceIssues/
+                                 queryReferenceIssues — pure enumerators,
+                                 one per source-object family
+  workspaceIntegrity.ts       validateWorkspaceIntegrity(snapshot): the
+                                 canonical structural-integrity check,
+                                 running all three enumerators above
+  expressionDependents.ts     findColumnReferencesInExpression() (parses via
+                                 the real parseExpression, walks the AST for
+                                 ColumnReferenceNodes — never the binder,
+                                 never regex) + findCalculatedColumnDependents()
+                                 — a deliberate, documented conservative
+                                 over-approximation (see docs/WORKSPACE_INTEGRITY.md)
+  mutationImpact.ts           one pure, read-only analyze* function per
+                                 mutation kind (analyzeDeleteModel,
+                                 analyzeDeleteDataset, analyzeDeleteQuery,
+                                 analyzeDisableQueryLoad,
+                                 analyzeRemoveModelTable, analyzeDeleteMeasure,
+                                 analyzeDeleteCalculatedColumn) — RESTRICT
+                                 (blockers) or CASCADE (cascaded ids), never
+                                 mutating the snapshot itself
+
+conformance/
+  types.ts                    DaxConformanceCase — fixture, expression,
+                                 evaluationMode, expected, provenance
+                                 ('hand-calculated' | 'documented-dax-semantics'
+                                 | 'power-bi-verified'), knownDivergence?
+  runCase.ts                  runConformanceCase() — runs a case through the
+                                 real public createMeasure/evaluateMeasure or
+                                 createCalculatedColumn APIs, comparing via
+                                 the pre-existing compareScalar
+                                 (runtime/validation/scalarComparison.ts)
+  report.ts                   summarizeConformance/formatConformanceReport —
+                                 generated from the actual case list
+
+tests/conformance/fixtures/   sharedFixture.ts + one file per family
+                                 (scalar, blanks, variables, aggregations,
+                                 filterContext, calculate, iterators,
+                                 relationships, timeIntelligence,
+                                 advancedRelationships) — 83 cases total,
+                                 aggregated in fixtures/index.ts
+
+tests/support/expectWorkspaceIntegrity.ts   expectWorkspaceIntegrity(
+                                               snapshot).toBeValid() — used
+                                               after every destructive-
+                                               mutation test across the suite
+
+docs/WORKSPACE_INTEGRITY.md, docs/SEMANTIC_CONFORMANCE.md
+```
+
+Modified files, and exactly what changed:
+
+```text
+runtime/notebook/notebookRuntime.ts   removeDataset/removeMeasureCell/
+                                         removeCalculatedColumnCell/
+                                         setQueryLoadEnabled now return
+                                         { removed/updated: boolean;
+                                         blockers?: WorkspaceIntegrityIssue[] }
+                                         instead of void; removeModel returns
+                                         { removed: boolean; cascadedCellIds };
+                                         removeTableFromModel returns
+                                         { removed; cascadedCalculatedColumnIds;
+                                         cascadedMeasureIds; cascadedCellIds };
+                                         deleteQuery keeps its existing
+                                         { deleted, blockedByQueries,
+                                         referencedByModels } shape, but
+                                         referencedByModels.length > 0 now also
+                                         sets deleted: false (was
+                                         informational-only) — every one of
+                                         these methods calls the matching
+                                         analyze* function internally before
+                                         mutating, the single enforcement point
+runtime/model/modelRuntime.ts         removeTable() now also filters
+                                         measures whose homeModelTableId
+                                         matches the removed table (previously
+                                         only relationships/calculatedColumns/
+                                         dateTables were cleaned up — a
+                                         confirmed pre-Sprint-15 gap, now closed)
+runtime/notebook/useNotebookRuntime.ts   action wrappers propagate the
+                                            richer return types and only
+                                            persist (save/delete in IndexedDB)
+                                            when the mutation actually succeeded
+components/notebook/
+  DataCellCard.tsx, CalculatedColumnCellCard.tsx, MeasureCellCard.tsx,
+  QueryCellCard.tsx                   show a role="alert" warning with the
+                                         blocker reason when a mutation is
+                                         blocked; QueryCellCard.tsx also gained
+                                         handleSetLoadEnabled
+
+expression/
+  ast.ts                       + VarReturnExpressionNode { variables,
+                                  body, span } — no dedicated "variable
+                                  reference" node; a bare name (`Revenue`)
+                                  already parses as the pre-existing
+                                  TableReferenceNode, and the binder decides
+                                  whether it's a variable, exactly mirroring
+                                  how TableReferenceNode already worked for
+                                  bare-table arguments
+  parser.ts                    + parseVarReturn(), hooked at the very top of
+                                  parseExpression() (detects VAR/RETURN via
+                                  token.text.toUpperCase(), the same
+                                  technique already used for TRUE/FALSE) —
+                                  VAR/RETURN nests for free anywhere an
+                                  expression is accepted
+  binder.ts, measureBinder.ts  + variables: Map/pendingVariables: Set/
+                                  inVariableScope threaded through the bind
+                                  context; parallel BoundVariableReference/
+                                  BoundVarReturn (calculated columns) and
+                                  BoundMeasureVariableReference/
+                                  BoundMeasureVarReturn (measures);
+                                  measureBinder.ts also pre-checks each VAR
+                                  value against TABLE_PRODUCING_FUNCTION_NAMES
+                                  and rejects a bare table name, both with
+                                  TABLE_VARIABLE_NOT_SUPPORTED (scalar-only,
+                                  explicitly enforced); + BoundIsBlank
+                                  (both binders); measureBinder.ts also gains
+                                  BoundHasOneValue and a keepFilters case
+                                  inside bindCalculateFilterArgument's dispatch
+  diagnostics.ts                + DUPLICATE_VARIABLE/UNKNOWN_VARIABLE/
+                                  FORWARD_VARIABLE_REFERENCE/
+                                  INVALID_VARIABLE_NAME/
+                                  TABLE_VARIABLE_NOT_SUPPORTED/
+                                  UNSUPPORTED_KEEPFILTERS_SHAPE
+  evaluator.ts, measureEvaluator.ts   + variables: Map<string, NodeResult>
+                                  on EvalContext/MeasureEvalContext; a
+                                  VarReturn node builds a locally-extended
+                                  copy of the map per declaration (never
+                                  mutating the shared context) for correct
+                                  lexical scoping; measureEvaluator.ts's
+                                  evaluateCalculate carries variables through
+                                  a nested CALCULATE call unchanged (a
+                                  DAX variable is captured once, immune to a
+                                  later context transition), while
+                                  evaluateMeasureById evaluates a *different*
+                                  referenced measure's own tree under a
+                                  fresh, empty variables map so no VAR
+                                  leaks across measure boundaries; +
+                                  distinctVisibleValues() helper (factored
+                                  out of the pre-existing
+                                  evaluateSelectedValue, now shared with
+                                  HASONEVALUE)
+  trace.ts                      + 'var-return' | 'variable-declaration' |
+                                  'variable-reference' trace node kinds
+
+runtime/measure/contextModifier.ts   + optional keepFilters?: boolean on
+                                        ReplaceColumnFilterModifier (mirrors
+                                        the pre-existing PredicateFilterModifier
+                                        .tableWide flag precedent); when set,
+                                        intersects with any existing
+                                        ColumnFilter on that column instead of
+                                        unconditionally replacing, reusing the
+                                        same same-column intersection
+                                        arithmetic mergeFilterContexts already
+                                        implements in filterContext.ts
+```
+
+No visual-specific or validation-specific code changed for Part B: every
+`KPI`/`Table`/`Bar`/`Line`, the Context Explorer, and every existing
+validation rule already consume `evaluateMeasure`'s output generically, so a
+`VAR`/`RETURN`, `ISBLANK`, `HASONEVALUE` or `KEEPFILTERS` measure "just
+works" the moment it's created. `SemanticModel`, `CalculatedColumn`,
+`Measure`, and every `runtime/dateTable/*`/`runtime/query/*`/
+`runtime/visual/*` file are untouched by Part A — workspace integrity is
+enforced entirely inside `NotebookRuntime`'s own mutation methods, never a
+second BI engine. See [`docs/WORKSPACE_INTEGRITY.md`](./docs/WORKSPACE_INTEGRITY.md),
+[`docs/SEMANTIC_CONFORMANCE.md`](./docs/SEMANTIC_CONFORMANCE.md),
+[`docs/EXPRESSION_ENGINE.md`](./docs/EXPRESSION_ENGINE.md) "Variables
+(VAR/RETURN)", [`docs/MEASURES.md`](./docs/MEASURES.md) and
+[`docs/CALCULATE.md`](./docs/CALCULATE.md) for the full design. 113 test
+files / 1005 tests (1004 passed + 1 skipped known-divergence) passing.
 
 ## Expression strategy
 

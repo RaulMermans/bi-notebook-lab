@@ -152,6 +152,42 @@ export interface BoundSelectedValue {
   span: SourceSpan
 }
 
+/** Sprint 15 (VAR/RETURN) — see `binder.ts`'s `BoundVariableReference`/`BoundVarReturn` doc comments; the measure-context siblings. */
+export interface BoundMeasureVariableReference {
+  kind: 'VariableReference'
+  name: string
+  span: SourceSpan
+}
+
+export interface BoundMeasureVariableDeclaration {
+  name: string
+  value: BoundMeasureExpression
+}
+
+export interface BoundMeasureVarReturn {
+  kind: 'VarReturn'
+  variables: BoundMeasureVariableDeclaration[]
+  body: BoundMeasureExpression
+  span: SourceSpan
+}
+
+/** Sprint 15 (ISBLANK) — one-arg, no filter-context dependency, valid in both binders. */
+export interface BoundIsBlank {
+  kind: 'IsBlank'
+  operand: BoundMeasureExpression
+  span: SourceSpan
+}
+
+/** Sprint 15 (HASONEVALUE) — measure-only: "exactly one distinct visible value" under the current FilterContext. */
+export interface BoundHasOneValue {
+  kind: 'HasOneValue'
+  column: ColumnRef
+  modelTableId: string
+  columnName: string
+  tableName: string
+  span: SourceSpan
+}
+
 export type BoundMeasureExpression =
   | BoundMeasureLiteral
   | BoundMeasureUnary
@@ -168,10 +204,25 @@ export type BoundMeasureExpression =
   | BoundMeasureBlank
   | BoundSelectedValue
   | BoundIteratorCall
+  | BoundMeasureVariableReference
+  | BoundMeasureVarReturn
+  | BoundIsBlank
+  | BoundHasOneValue
 
 export interface MeasureBindContext {
   model: SemanticModel
   datasets: Record<string, Dataset>
+  /**
+   * Sprint 15 (VAR/RETURN). Optional because `MeasureBindContext` is
+   * constructed as a plain `{model, datasets}` object literal by external
+   * callers (`measureRuntime.ts`, etc.) — every read site defaults via
+   * `??`. `bindMeasureExpression` (the real entry point) sets these
+   * explicitly. See `binder.ts`'s `ResolvedBindContext` for the equivalent
+   * fields in the calculated-column binder.
+   */
+  variables?: Map<string, BoundMeasureExpression>
+  pendingVariables?: Set<string>
+  inVariableScope?: boolean
 }
 
 export interface MeasureBindResult {
@@ -346,6 +397,9 @@ const UNSUPPORTED_CALCULATE_ADJACENT_FUNCTIONS = new Set([
   'ALLSELECTED',
   'CALCULATETABLE',
 ])
+
+/** Sprint 15 (VAR/RETURN): `VAR`/`RETURN` themselves can't double as variable names. */
+const INVALID_VARIABLE_NAME = /^(VAR|RETURN)$/i
 
 /** Extracts `Column = Literal` (or `Literal = Column`) as a canonical `ColumnFilter` — sprint brief §16 "Equality can usually become a canonical ColumnFilter directly." */
 function tryExtractEqualityColumnFilter(node: BoundPredicateNode): { column: ColumnRef; value: number | string | boolean } | undefined {
@@ -835,7 +889,43 @@ function bindCrossFilter(node: FunctionCallNode, ctx: MeasureBindContext): { mod
   }
 }
 
-/** Binds one CALCULATE filter argument — dispatches to REMOVEFILTERS/ALL/FILTER/time-intelligence/USERELATIONSHIP/CROSSFILTER, or tries it as a direct boolean filter expression (sprint brief §12-§21, §22-§34). */
+/**
+ * Binds `KEEPFILTERS(Table[Column] = value)` (Sprint 15, bounded — see
+ * docs/CALCULATE.md "KEEPFILTERS"). Only a direct equality filter is
+ * supported: binding delegates to `bindDirectBooleanFilter` and rejects
+ * anything that doesn't collapse to a `ReplaceColumnFilter` (a comparison
+ * or compound predicate) with a specific diagnostic rather than silently
+ * misinterpreting it.
+ */
+function bindKeepFilters(node: FunctionCallNode, ctx: MeasureBindContext): { modifier?: FilterModifier; diagnostics: ExpressionDiagnostic[] } {
+  if (node.args.length !== 1) {
+    return {
+      diagnostics: [
+        diagnostic('error', 'UNSUPPORTED_KEEPFILTERS_SHAPE', 'KEEPFILTERS expects exactly one argument, e.g. KEEPFILTERS(Table[Column] = value).', node.span),
+      ],
+    }
+  }
+
+  const result = bindDirectBooleanFilter(node.args[0], ctx)
+  if (!result.modifier) return result
+  if (result.modifier.kind !== 'ReplaceColumnFilter') {
+    return {
+      diagnostics: [
+        ...result.diagnostics,
+        diagnostic(
+          'error',
+          'UNSUPPORTED_KEEPFILTERS_SHAPE',
+          'KEEPFILTERS is only supported around a direct equality filter in this release, e.g. KEEPFILTERS(Table[Column] = value) — not a comparison or compound predicate.',
+          node.span,
+        ),
+      ],
+    }
+  }
+
+  return { modifier: { ...result.modifier, keepFilters: true, label: `KEEPFILTERS(${result.modifier.label})` }, diagnostics: result.diagnostics }
+}
+
+/** Binds one CALCULATE filter argument — dispatches to REMOVEFILTERS/ALL/FILTER/time-intelligence/USERELATIONSHIP/CROSSFILTER/KEEPFILTERS, or tries it as a direct boolean filter expression (sprint brief §12-§21, §22-§34). */
 function bindCalculateFilterArgument(argNode: Expression, ctx: MeasureBindContext): { modifier?: FilterModifier; diagnostics: ExpressionDiagnostic[] } {
   if (argNode.kind === 'FunctionCall') {
     const name = argNode.name.toUpperCase()
@@ -844,6 +934,7 @@ function bindCalculateFilterArgument(argNode: Expression, ctx: MeasureBindContex
     if (name === 'FILTER') return bindFilterFunction(argNode, ctx)
     if (name === 'USERELATIONSHIP') return bindUserRelationship(argNode, ctx)
     if (name === 'CROSSFILTER') return bindCrossFilter(argNode, ctx)
+    if (name === 'KEEPFILTERS') return bindKeepFilters(argNode, ctx)
     if (TIME_INTELLIGENCE_FUNCTION_NAMES.has(name)) return bindTimeIntelligenceFilterModifier(argNode, ctx)
     if (UNSUPPORTED_CALCULATE_ADJACENT_FUNCTIONS.has(name)) {
       return {
@@ -1003,6 +1094,144 @@ function bindSelectedValue(node: FunctionCallNode, ctx: MeasureBindContext): Mea
   }
 }
 
+/** Binds `ISBLANK(expression)` (Sprint 15) — a scalar wrapper, valid anywhere any other measure expression is. */
+function bindIsBlankMeasure(node: FunctionCallNode, ctx: MeasureBindContext): MeasureBindResult {
+  if (node.args.length !== 1) {
+    return { diagnostics: [diagnostic('error', 'INVALID_FUNCTION_ARGUMENT', 'ISBLANK expects exactly one argument, e.g. ISBLANK([Total Revenue]).', node.span)] }
+  }
+  const operand = bindMeasureNode(node.args[0], ctx)
+  if (!operand.bound) return { diagnostics: operand.diagnostics }
+  return { bound: { kind: 'IsBlank', operand: operand.bound, span: node.span }, diagnostics: operand.diagnostics }
+}
+
+/**
+ * Binds `HASONEVALUE(Table[Column])` (Sprint 15) — measure-only (needs
+ * `FilterContext`): "exactly one distinct visible value" under the current
+ * context. Binds identically to `bindSelectedValue` (arity 1, no
+ * alternate); evaluation shares the same "distinct visible values"
+ * computation, see `measureEvaluator.ts`.
+ */
+function bindHasOneValue(node: FunctionCallNode, ctx: MeasureBindContext): MeasureBindResult {
+  if (node.args.length !== 1) {
+    return { diagnostics: [diagnostic('error', 'INVALID_FUNCTION_ARGUMENT', 'HASONEVALUE expects exactly one argument, e.g. HASONEVALUE(Customers[Country]).', node.span)] }
+  }
+  const [columnArg] = node.args
+  if (columnArg.kind !== 'ColumnReference' || columnArg.table === null) {
+    return {
+      diagnostics: [diagnostic('error', 'INVALID_FUNCTION_ARGUMENT', 'HASONEVALUE expects a column, e.g. HASONEVALUE(Customers[Country]).', columnArg.span)],
+    }
+  }
+
+  const modelTable = findModelTableByName(ctx.model, ctx.datasets, columnArg.table)
+  if (!modelTable) {
+    return { diagnostics: [diagnostic('error', 'UNKNOWN_TABLE', `Unknown table "${columnArg.table}".`, columnArg.tableSpan ?? columnArg.span, { table: columnArg.table })] }
+  }
+  const resolved = resolveTableRef(ctx.datasets, modelTable)
+  const column = resolved?.table.columns.find((c) => c.name.toLowerCase() === columnArg.column.toLowerCase())
+  if (!resolved || !column) {
+    return {
+      diagnostics: [diagnostic('error', 'UNKNOWN_COLUMN', `Unknown column "${columnArg.column}" on "${columnArg.table}".`, columnArg.columnSpan, { table: columnArg.table, column: columnArg.column })],
+    }
+  }
+
+  return {
+    bound: {
+      kind: 'HasOneValue',
+      column: { datasetId: resolved.dataset.id, tableId: resolved.table.id, columnId: column.id },
+      modelTableId: modelTable.id,
+      columnName: column.name,
+      tableName: resolved.table.name,
+      span: node.span,
+    },
+    diagnostics: [],
+  }
+}
+
+const TABLE_PRODUCING_FUNCTION_NAMES = new Set([
+  'FILTER',
+  'VALUES',
+  'DISTINCT',
+  'ALL',
+  'ALLEXCEPT',
+  'ALLSELECTED',
+  'REMOVEFILTERS',
+  'CALCULATETABLE',
+  'SUMMARIZE',
+  'ADDCOLUMNS',
+  'SELECTCOLUMNS',
+])
+
+/**
+ * Binds `VAR name1 = expr1 [VAR name2 = expr2 ...] RETURN body` in measure
+ * context (Sprint 15, scalar-only — see docs/EXPRESSION_ENGINE.md
+ * "Variables" and `binder.ts`'s `bindVarReturn`, which this mirrors).
+ * `TABLE_PRODUCING_FUNCTION_NAMES` is a syntactic pre-check: measures (unlike
+ * calculated columns) have genuine table-producing functions, so a
+ * `VAR t = FILTER(...)`-shaped declaration must be rejected explicitly
+ * rather than falling through to whatever generic error the function would
+ * otherwise produce when bound as a plain scalar.
+ */
+function bindMeasureVarReturn(node: Extract<Expression, { kind: 'VarReturn' }>, ctx: MeasureBindContext): MeasureBindResult {
+  const diagnostics: ExpressionDiagnostic[] = []
+  const declaredNames = new Set<string>()
+  const pendingVariables = new Set<string>()
+
+  for (const decl of node.variables) {
+    const lower = decl.name.toLowerCase()
+    if (INVALID_VARIABLE_NAME.test(decl.name)) {
+      diagnostics.push(diagnostic('error', 'INVALID_VARIABLE_NAME', `"${decl.name}" can't be used as a variable name.`, decl.nameSpan, { name: decl.name }))
+      continue
+    }
+    if (declaredNames.has(lower)) {
+      diagnostics.push(diagnostic('error', 'DUPLICATE_VARIABLE', `Variable "${decl.name}" is already declared in this VAR block.`, decl.nameSpan, { name: decl.name }))
+      continue
+    }
+    declaredNames.add(lower)
+    pendingVariables.add(lower)
+  }
+
+  let variables = ctx.variables ?? new Map<string, BoundMeasureExpression>()
+  const boundDeclarations: BoundMeasureVariableDeclaration[] = []
+  const resolvedNames = new Set<string>()
+
+  for (const decl of node.variables) {
+    const lower = decl.name.toLowerCase()
+    if (resolvedNames.has(lower) || INVALID_VARIABLE_NAME.test(decl.name)) continue
+    resolvedNames.add(lower)
+
+    if (decl.value.kind === 'FunctionCall' && TABLE_PRODUCING_FUNCTION_NAMES.has(decl.value.name.toUpperCase())) {
+      pendingVariables.delete(lower)
+      diagnostics.push(
+        diagnostic(
+          'error',
+          'TABLE_VARIABLE_NOT_SUPPORTED',
+          `"${decl.name}" would hold a table, but Sprint 15 only supports scalar variables — ${decl.value.name}(...) can't be used as a VAR value.`,
+          decl.value.span,
+          { name: decl.name },
+        ),
+      )
+      continue
+    }
+
+    // Still pending while binding its own value — a self-reference (`VAR x = x + 1`)
+    // must read as forward-reference, not "unknown," so the delete happens after.
+    const declResult = bindMeasureNode(decl.value, { ...ctx, variables, pendingVariables, inVariableScope: true })
+    pendingVariables.delete(lower)
+    diagnostics.push(...declResult.diagnostics)
+    if (declResult.bound) {
+      variables = new Map(variables)
+      variables.set(lower, declResult.bound)
+      boundDeclarations.push({ name: decl.name, value: declResult.bound })
+    }
+  }
+
+  const bodyResult = bindMeasureNode(node.body, { ...ctx, variables, pendingVariables: new Set(), inVariableScope: true })
+  diagnostics.push(...bodyResult.diagnostics)
+  if (!bodyResult.bound) return { diagnostics }
+
+  return { bound: { kind: 'VarReturn', variables: boundDeclarations, body: bodyResult.bound, span: node.span }, diagnostics }
+}
+
 /**
  * Binds `TOTALYTD(expression, Table[DateColumn])` (sprint brief §35-§36) as
  * the semantic equivalent of `CALCULATE(expression, DATESYTD(Table[DateColumn]))`
@@ -1151,6 +1380,8 @@ function bindMeasureFunctionCall(node: FunctionCallNode, ctx: MeasureBindContext
   if (name === 'IF') return bindIfMeasure(node, ctx)
   if (name === 'SWITCH') return bindSwitchMeasure(node, ctx)
   if (name === 'SELECTEDVALUE') return bindSelectedValue(node, ctx)
+  if (name === 'ISBLANK') return bindIsBlankMeasure(node, ctx)
+  if (name === 'HASONEVALUE') return bindHasOneValue(node, ctx)
   if (name === 'BLANK') {
     if (node.args.length !== 0) {
       return { diagnostics: [diagnostic('error', 'INVALID_FUNCTION_ARGUMENT', 'BLANK() takes no arguments.', node.span)] }
@@ -1258,7 +1489,42 @@ function bindMeasureNode(node: Expression, ctx: MeasureBindContext): MeasureBind
     case 'FunctionCall':
       return bindMeasureFunctionCall(node, ctx)
 
-    case 'TableReference':
+    case 'TableReference': {
+      const lower = node.table.toLowerCase()
+      const variable = ctx.variables?.get(lower)
+      if (variable) {
+        return { bound: { kind: 'VariableReference', name: node.table, span: node.span }, diagnostics: [] }
+      }
+      if (ctx.pendingVariables?.has(lower)) {
+        return {
+          diagnostics: [
+            diagnostic(
+              'error',
+              'FORWARD_VARIABLE_REFERENCE',
+              `"${node.table}" can't be used here — a VAR can only reference variables declared earlier in the same VAR block, not itself or one declared later.`,
+              node.span,
+              { name: node.table },
+            ),
+          ],
+        }
+      }
+      if (ctx.inVariableScope) {
+        const modelTable = findModelTableByName(ctx.model, ctx.datasets, node.table)
+        if (modelTable) {
+          return {
+            diagnostics: [
+              diagnostic(
+                'error',
+                'TABLE_VARIABLE_NOT_SUPPORTED',
+                `"${node.table}" is a table — table-valued variables aren't supported yet. Only scalar VAR is supported this release.`,
+                node.span,
+                { table: node.table },
+              ),
+            ],
+          }
+        }
+        return { diagnostics: [diagnostic('error', 'UNKNOWN_VARIABLE', `Unknown variable "${node.table}".`, node.span, { name: node.table })] }
+      }
       return {
         diagnostics: [
           diagnostic(
@@ -1270,6 +1536,10 @@ function bindMeasureNode(node: Expression, ctx: MeasureBindContext): MeasureBind
           ),
         ],
       }
+    }
+
+    case 'VarReturn':
+      return bindMeasureVarReturn(node, ctx)
 
     default:
       return { diagnostics: [] }
@@ -1283,5 +1553,11 @@ function bindMeasureNode(node: Expression, ctx: MeasureBindContext): MeasureBind
  * in domain/model.ts), never what it can read.
  */
 export function bindMeasureExpression(expression: Expression, ctx: MeasureBindContext): MeasureBindResult {
-  return bindMeasureNode(expression, ctx)
+  return bindMeasureNode(expression, {
+    model: ctx.model,
+    datasets: ctx.datasets,
+    variables: ctx.variables ?? new Map(),
+    pendingVariables: ctx.pendingVariables ?? new Set(),
+    inVariableScope: ctx.inVariableScope ?? false,
+  })
 }

@@ -5,6 +5,7 @@ import type { Measure, SemanticModel } from '../../domain/model'
 import type { ExpressionDiagnostic } from '../../expression/diagnostics'
 import type { ColumnFilter } from '../../runtime/measure/filterContext'
 import { evaluateMeasure, type MeasureExecution } from '../../runtime/measure/measureRuntime'
+import type { RemovalResult } from '../../runtime/notebook/notebookRuntime'
 import { resolveTableRef } from '../../runtime/model/modelRuntime'
 import { ContextFilterEditor } from '../context/ContextFilterEditor'
 import { ExpressionEditor } from './calculatedColumn/ExpressionEditor'
@@ -15,7 +16,7 @@ interface MeasureCellCardProps {
   model: SemanticModel | undefined
   datasets: Record<string, Dataset>
   onUpdate: (patch: { name?: string; expression?: string }) => Promise<{ measure?: Measure; execution?: MeasureExecution; diagnostics: ExpressionDiagnostic[] }>
-  onRemove: () => void
+  onRemove: () => Promise<RemovalResult>
 }
 
 function formatMeasureValue(value: unknown): string {
@@ -37,6 +38,7 @@ export function MeasureCellCard({ cell, model, datasets, onUpdate, onRemove }: M
   const [runDiagnostics, setRunDiagnostics] = useState<ExpressionDiagnostic[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [filters, setFilters] = useState<ColumnFilter[]>([])
+  const [removeWarning, setRemoveWarning] = useState<string | null>(null)
 
   useEffect(() => {
     setDraftExpression(measure?.expression ?? '')
@@ -81,6 +83,19 @@ export function MeasureCellCard({ cell, model, datasets, onUpdate, onRemove }: M
     }
   }
 
+  const measureName = measure.name
+
+  async function handleRemove() {
+    const result = await onRemove()
+    if (!result.removed) {
+      setRemoveWarning(
+        result.blockers && result.blockers.length > 0
+          ? `Can't remove "${measureName}": ${result.blockers.map((b) => b.reason).join(' ')}`
+          : `Can't remove "${measureName}".`,
+      )
+    }
+  }
+
   return (
     <article className="cell cell--measure">
       <div className="cell__rail">
@@ -98,11 +113,13 @@ export function MeasureCellCard({ cell, model, datasets, onUpdate, onRemove }: M
             <button type="button" className="text-button" onClick={() => setExpanded((v) => !v)}>
               {expanded ? 'Collapse' : 'Expand'}
             </button>
-            <button type="button" className="text-button" onClick={onRemove}>
+            <button type="button" className="text-button" onClick={handleRemove}>
               Remove
             </button>
           </div>
         </div>
+
+        {removeWarning && <p className="import-panel__error" role="alert">{removeWarning}</p>}
 
         <pre className="calculated-column-expression-preview">
           <code>{measure.expression}</code>

@@ -4,6 +4,7 @@ import type { Dataset } from '../../../domain/data'
 import type { QueryDefinition, QueryStep, QueryStepKind } from '../../../domain/query'
 import { frameAtStep, resolveSourceColumns, type QueryEvaluationDetail } from '../../../runtime/query/queryRuntime'
 import type { NewStepInput } from '../../../runtime/query/queryStepFactory'
+import type { UpdateResult } from '../../../runtime/notebook/notebookRuntime'
 import {
   AppendQueriesForm,
   ChangeTypeForm,
@@ -40,7 +41,7 @@ interface QueryCellCardProps {
   onRenameStep: (stepId: string, name: string) => void
   onRemoveStep: (stepId: string) => void
   onMoveStep: (stepId: string, toIndex: number) => void
-  onSetLoadEnabled: (loadEnabled: boolean) => void
+  onSetLoadEnabled: (loadEnabled: boolean) => Promise<UpdateResult>
   onRemove: () => Promise<{ deleted: boolean; blockedByQueries: string[]; referencedByModels: string[] }>
 }
 
@@ -137,12 +138,19 @@ export function QueryCellCard({
   async function handleRemove() {
     const result = await onRemove()
     if (!result.deleted) {
-      setDeleteWarning(
-        result.blockedByQueries.length > 0
-          ? `Can't delete: ${result.blockedByQueries.length} other quer${result.blockedByQueries.length === 1 ? 'y' : 'ies'} still reference this one.`
-          : "Can't delete this query.",
-      )
+      if (result.blockedByQueries.length > 0) {
+        setDeleteWarning(`Can't delete: ${result.blockedByQueries.length} other quer${result.blockedByQueries.length === 1 ? 'y' : 'ies'} still reference this one.`)
+      } else if (result.referencedByModels.length > 0) {
+        setDeleteWarning(`Can't delete: ${result.referencedByModels.length} model${result.referencedByModels.length === 1 ? '' : 's'} still use this query's output.`)
+      } else {
+        setDeleteWarning("Can't delete this query.")
+      }
     }
+  }
+
+  async function handleSetLoadEnabled(loadEnabled: boolean) {
+    const result = await onSetLoadEnabled(loadEnabled)
+    setDeleteWarning(result.updated ? null : "Can't disable load: this query's output is used by a model.")
   }
 
   return (
@@ -172,7 +180,7 @@ export function QueryCellCard({
           </div>
           <div className="cell__header-actions">
             <label className="query-load-toggle">
-              <input type="checkbox" checked={query.loadEnabled} onChange={(e) => onSetLoadEnabled(e.target.checked)} />
+              <input type="checkbox" checked={query.loadEnabled} onChange={(e) => handleSetLoadEnabled(e.target.checked)} />
               Enable Load
             </label>
             <button type="button" className="text-button" onClick={handleRemove}>Remove</button>

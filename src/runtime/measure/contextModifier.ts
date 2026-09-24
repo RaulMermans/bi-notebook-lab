@@ -32,6 +32,17 @@ export interface ReplaceColumnFilterModifier {
   operator: 'equals' | 'in'
   values: unknown[]
   label: string
+  /**
+   * Sprint 15 (KEEPFILTERS, bounded to a direct equality filter — see
+   * docs/CALCULATE.md "KEEPFILTERS"). When true, `applyFilterModifier`
+   * *intersects* this filter's values with whatever `ColumnFilter` already
+   * exists on the same column instead of replacing it — the same
+   * same-column intersection `mergeFilterContexts` (`filterContext.ts`)
+   * already implements, reused rather than reimplemented. Mirrors the
+   * existing `PredicateFilterModifier.tableWide` precedent for "a flag on
+   * the modifier changes fold-in behavior."
+   */
+  keepFilters?: boolean
 }
 
 /**
@@ -237,7 +248,15 @@ export function applyFilterModifier(
 ): ModifierOutcome {
   switch (modifier.kind) {
     case 'ReplaceColumnFilter': {
-      ctx.columnFilters.set(columnKey(modifier.column), { column: modifier.column, operator: modifier.operator, values: modifier.values })
+      const key = columnKey(modifier.column)
+      const existing = modifier.keepFilters ? ctx.columnFilters.get(key) : undefined
+      if (existing) {
+        const existingValues = new Set(existing.values)
+        const intersected = modifier.values.filter((value) => existingValues.has(value))
+        ctx.columnFilters.set(key, { column: modifier.column, operator: intersected.length <= 1 ? 'equals' : 'in', values: intersected })
+      } else {
+        ctx.columnFilters.set(key, { column: modifier.column, operator: modifier.operator, values: modifier.values })
+      }
       return { kind: modifier.kind, label: modifier.label }
     }
 

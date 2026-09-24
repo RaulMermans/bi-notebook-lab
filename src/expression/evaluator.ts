@@ -26,10 +26,21 @@ export interface EvalContext {
   model: SemanticModel
   datasets: Record<string, Dataset>
   relatedIndexCache: Map<string, { index: Map<unknown, Record<string, unknown>>; keyColumnName: string }>
+  /**
+   * Sprint 15 (VAR/RETURN): variables visible at this point of evaluation,
+   * keyed lowercase, evaluated exactly once (cached `NodeResult`, so a
+   * later reference is a lookup, never a recompute). `ctx` is reused across
+   * every row in `evaluateBoundExpressionOverTable`'s loop, so this map is
+   * never mutated in place — a `VarReturn` node builds a locally-extended
+   * copy for its own declarations/body only and passes that in a *new* ctx
+   * object to its own children, leaving the shared `ctx.variables` (empty,
+   * from `createEvalContext`) untouched for every other row/sibling.
+   */
+  variables: Map<string, NodeResult>
 }
 
 export function createEvalContext(model: SemanticModel, datasets: Record<string, Dataset>): EvalContext {
-  return { model, datasets, relatedIndexCache: new Map() }
+  return { model, datasets, relatedIndexCache: new Map(), variables: new Map() }
 }
 
 interface NodeResult {
@@ -286,6 +297,41 @@ function evaluateNode(node: BoundExpression, rowContext: RowContext, ctx: EvalCo
 
     case 'Blank':
       return { value: null, trace: { kind: 'literal', label: 'BLANK', value: null } }
+
+    case 'IsBlank': {
+      const operand = evaluateNode(node.operand, rowContext, ctx, rowIndex)
+      const value = operand.value === null || operand.value === undefined
+      return { value, error: operand.error, trace: { kind: 'unary-operation', label: `ISBLANK(${formatValue(operand.value)})`, value, children: [operand.trace] } }
+    }
+
+    case 'VariableReference': {
+      const result = ctx.variables.get(node.name.toLowerCase())
+      // The binder guarantees every VariableReference resolves to a declared
+      // variable; this fallback only guards against a malformed bound tree.
+      if (!result) return { value: null, trace: { kind: 'variable-reference', label: node.name, value: null } }
+      // Reuse the cached value/error (evaluated once) but replace the trace
+      // with a lean leaf — the expensive computation's own trace already
+      // lives under the declaration node, so it must not be duplicated into
+      // the tree on every reference.
+      return { ...result, trace: { kind: 'variable-reference', label: node.name, value: result.value } }
+    }
+
+    case 'VarReturn': {
+      let variables = ctx.variables
+      const declarationTraces: ExecutionTraceNode[] = []
+      for (const decl of node.variables) {
+        const result = evaluateNode(decl.value, rowContext, { ...ctx, variables }, rowIndex)
+        variables = new Map(variables)
+        variables.set(decl.name.toLowerCase(), result)
+        declarationTraces.push({ kind: 'variable-declaration', label: decl.name, value: result.value, children: [result.trace] })
+      }
+      const body = evaluateNode(node.body, rowContext, { ...ctx, variables }, rowIndex)
+      return {
+        value: body.value,
+        error: body.error,
+        trace: { kind: 'var-return', label: 'VAR/RETURN', value: body.value, children: [...declarationTraces, body.trace] },
+      }
+    }
   }
 }
 

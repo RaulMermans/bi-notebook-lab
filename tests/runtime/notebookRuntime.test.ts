@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Dataset } from '../../src/domain/data'
 import { NotebookRuntime, emptyNotebook } from '../../src/runtime/notebook/notebookRuntime'
+import { expectWorkspaceIntegrity } from '../support/expectWorkspaceIntegrity'
 
 function fakeDataset(id: string, name: string): Dataset {
   return {
@@ -14,7 +15,7 @@ function fakeDataset(id: string, name: string): Dataset {
 
 describe('NotebookRuntime', () => {
   it('adds a DataCell and registers its dataset when importing', () => {
-    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {}, queries: {}, queryEvaluations: {} })
     const dataset = fakeDataset('ds1', 'Sales')
 
     const cell = runtime.importDataset(dataset)
@@ -27,7 +28,7 @@ describe('NotebookRuntime', () => {
   })
 
   it('removes a dataset and its DataCell together', () => {
-    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {}, queries: {}, queryEvaluations: {} })
     runtime.importDataset(fakeDataset('ds1', 'Sales'))
 
     runtime.removeDataset('ds1')
@@ -38,7 +39,7 @@ describe('NotebookRuntime', () => {
   })
 
   it('preserves cell ordering when moving a cell', () => {
-    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {}, queries: {}, queryEvaluations: {} })
     runtime.importDataset(fakeDataset('a', 'A'))
     runtime.importDataset(fakeDataset('b', 'B'))
     runtime.importDataset(fakeDataset('c', 'C'))
@@ -51,7 +52,7 @@ describe('NotebookRuntime', () => {
   })
 
   it('removeCell drops only the targeted cell and keeps ordering of the rest', () => {
-    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {}, queries: {}, queryEvaluations: {} })
     runtime.importDataset(fakeDataset('a', 'A'))
     const [, second] = (() => {
       runtime.importDataset(fakeDataset('b', 'B'))
@@ -66,7 +67,7 @@ describe('NotebookRuntime', () => {
   })
 
   it('notifies subscribers on mutation and stops after unsubscribing', () => {
-    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {}, queries: {}, queryEvaluations: {} })
     let calls = 0
     const unsubscribe = runtime.subscribe(() => {
       calls += 1
@@ -81,7 +82,7 @@ describe('NotebookRuntime', () => {
   })
 
   it('creates a ModelCell and registers an empty model when createModelCell is called', () => {
-    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {}, queries: {}, queryEvaluations: {} })
 
     const { cell, model } = runtime.createModelCell('Retail Model')
     const snapshot = runtime.getSnapshot()
@@ -93,7 +94,7 @@ describe('NotebookRuntime', () => {
   })
 
   it('removes a model and its ModelCell together', () => {
-    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {}, queries: {}, queryEvaluations: {} })
     const { model } = runtime.createModelCell()
 
     runtime.removeModel(model.id)
@@ -104,7 +105,7 @@ describe('NotebookRuntime', () => {
   })
 
   function withSalesModel() {
-    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {} })
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {}, queries: {}, queryEvaluations: {} })
     const sales = fakeDataset('sales-ds', 'Sales')
     sales.tables[0].columns = [
       { id: 'revenue-col', name: 'Revenue', dataType: 'integer', nullable: false },
@@ -293,5 +294,102 @@ describe('NotebookRuntime', () => {
 
     const snapshot = runtime.getSnapshot()
     expect(snapshot.notebook.cells).toHaveLength(2)
+  })
+
+  // --- Sprint 15: Workspace Referential Integrity regressions ---
+
+  it('Sprint 15: deleting a model cascades every cell it owns and leaves the workspace valid (brief §36)', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+    const calc = runtime.createCalculatedColumnCell(model.id, { modelTableId: salesTableId, name: 'Margin', expression: 'Sales[Revenue] - Sales[Cost]' })
+    const measure = runtime.createMeasureCell(model.id, { homeModelTableId: salesTableId, name: 'Total Revenue', expression: 'SUM(Sales[Revenue])' })
+    const visual = runtime.createVisualCell(model.id, { id: 'v1', type: 'kpi', measureId: measure.measure!.id })
+    const testCell = runtime.createTestCell({ kind: 'model', modelId: model.id }, { title: 'Check', rules: [] })
+
+    const result = runtime.removeModel(model.id)
+    const snapshot = runtime.getSnapshot()
+
+    expect(result.removed).toBe(true)
+    expect(snapshot.models[model.id]).toBeUndefined()
+    for (const cellId of [calc.cell!.id, measure.cell!.id, visual.id, testCell.id]) {
+      expect(snapshot.notebook.cells.find((c) => c.id === cellId)).toBeUndefined()
+    }
+    expectWorkspaceIntegrity(snapshot).toBeValid()
+  })
+
+  it('Sprint 15: blocks removing a dataset a query sources from, and leaves the workspace valid (brief §37)', () => {
+    const runtime = new NotebookRuntime({ notebook: emptyNotebook(), datasets: {}, models: {}, queries: {}, queryEvaluations: {} })
+    const dataset = fakeDataset('ds1', 'Sales')
+    runtime.importDataset(dataset)
+    runtime.createQueryFromDataset(dataset.id, dataset.tables[0].id)
+
+    const result = runtime.removeDataset(dataset.id)
+
+    expect(result.removed).toBe(false)
+    expect(result.blockers?.length).toBeGreaterThan(0)
+    expect(runtime.getDataset(dataset.id)).toBeDefined()
+    expectWorkspaceIntegrity(runtime.getSnapshot()).toBeValid()
+  })
+
+  it('Sprint 15: blocks removing a dataset a model table references directly (brief §37)', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+    void salesTableId
+
+    const result = runtime.removeDataset('sales-ds')
+
+    expect(result.removed).toBe(false)
+    expect(runtime.getDataset('sales-ds')).toBeDefined()
+    expect(runtime.getModel(model.id)!.tables).toHaveLength(1)
+    expectWorkspaceIntegrity(runtime.getSnapshot()).toBeValid()
+  })
+
+  it('Sprint 15: blocks removing a measure another measure depends on, and leaves the workspace valid', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+    const base = runtime.createMeasureCell(model.id, { homeModelTableId: salesTableId, name: 'Total Revenue', expression: 'SUM(Sales[Revenue])' })
+    runtime.createMeasureCell(model.id, { homeModelTableId: salesTableId, name: 'Revenue x2', expression: '[Total Revenue] * 2' })
+
+    const result = runtime.removeMeasureCell(base.cell!.id)
+
+    expect(result.removed).toBe(false)
+    expect(runtime.getModel(model.id)!.measures.some((m) => m.id === base.measure!.id)).toBe(true)
+    expectWorkspaceIntegrity(runtime.getSnapshot()).toBeValid()
+  })
+
+  it('Sprint 15: blocks removing a measure a VisualCell still references', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+    const measure = runtime.createMeasureCell(model.id, { homeModelTableId: salesTableId, name: 'Total Revenue', expression: 'SUM(Sales[Revenue])' })
+    runtime.createVisualCell(model.id, { id: 'v1', type: 'kpi', measureId: measure.measure!.id })
+
+    const result = runtime.removeMeasureCell(measure.cell!.id)
+
+    expect(result.removed).toBe(false)
+    expectWorkspaceIntegrity(runtime.getSnapshot()).toBeValid()
+  })
+
+  it('Sprint 15: blocks removing a calculated column a measure still references by name', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+    const calc = runtime.createCalculatedColumnCell(model.id, { modelTableId: salesTableId, name: 'Margin', expression: 'Sales[Revenue] - Sales[Cost]' })
+    runtime.createMeasureCell(model.id, { homeModelTableId: salesTableId, name: 'Total Margin', expression: 'SUM(Sales[Margin])' })
+
+    const result = runtime.removeCalculatedColumnCell(calc.cell!.id)
+
+    expect(result.removed).toBe(false)
+    expect(runtime.getModel(model.id)!.calculatedColumns.some((c) => c.id === calc.calculatedColumn!.id)).toBe(true)
+    expectWorkspaceIntegrity(runtime.getSnapshot()).toBeValid()
+  })
+
+  it('Sprint 15: removing a model table cascades measures homed on it, their MeasureCells and dependent VisualCells', () => {
+    const { runtime, model, salesTableId } = withSalesModel()
+    const measure = runtime.createMeasureCell(model.id, { homeModelTableId: salesTableId, name: 'Total Revenue', expression: 'SUM(Sales[Revenue])' })
+    const visual = runtime.createVisualCell(model.id, { id: 'v1', type: 'kpi', measureId: measure.measure!.id })
+
+    const result = runtime.removeTableFromModel(model.id, salesTableId)
+    const snapshot = runtime.getSnapshot()
+
+    expect(result.removed).toBe(true)
+    expect(result.cascadedMeasureIds).toEqual([measure.measure!.id])
+    expect(snapshot.models[model.id]!.measures).toHaveLength(0)
+    expect(snapshot.notebook.cells.find((c) => c.id === measure.cell!.id)).toBeUndefined()
+    expect(snapshot.notebook.cells.find((c) => c.id === visual.id)).toBeUndefined()
+    expectWorkspaceIntegrity(snapshot).toBeValid()
   })
 })

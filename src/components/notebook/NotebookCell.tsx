@@ -10,7 +10,7 @@ import type { CalculatedColumnExecution } from '../../runtime/calculatedColumn/c
 import type { FilterContext } from '../../runtime/measure/filterContext'
 import type { MeasureExecution } from '../../runtime/measure/measureRuntime'
 import type { RelationshipConfigInput } from '../../runtime/model/modelRuntime'
-import type { DeleteQueryResult } from '../../runtime/notebook/notebookRuntime'
+import type { DeleteQueryResult, RemovalResult, RemoveModelResult, RemoveModelTableResult, UpdateResult } from '../../runtime/notebook/notebookRuntime'
 import type { QueryEvaluationDetail } from '../../runtime/query/queryRuntime'
 import type { NewStepInput } from '../../runtime/query/queryStepFactory'
 import { NotebookCellCard } from '../NotebookCellCard'
@@ -28,18 +28,18 @@ interface NotebookCellProps {
   models: Record<string, SemanticModel>
   queries: Record<string, QueryDefinition>
   queryEvaluations: Record<string, QueryEvaluationDetail>
-  onRemoveDataset: (datasetId: string) => void
+  onRemoveDataset: (datasetId: string) => Promise<RemovalResult>
   onTransformDataset: (datasetId: string, tableId: string) => void
   onRenameQuery: (queryId: string, name: string) => void
   onAddQueryStep: (queryId: string, input: NewStepInput, name?: string) => void
   onRenameQueryStep: (queryId: string, stepId: string, name: string) => void
   onRemoveQueryStep: (queryId: string, stepId: string) => void
   onMoveQueryStep: (queryId: string, stepId: string, toIndex: number) => void
-  onSetQueryLoadEnabled: (queryId: string, loadEnabled: boolean) => void
+  onSetQueryLoadEnabled: (queryId: string, loadEnabled: boolean) => Promise<UpdateResult>
   onDeleteQuery: (queryId: string) => Promise<DeleteQueryResult>
-  onRemoveModel: (modelId: string) => void
+  onRemoveModel: (modelId: string) => Promise<RemoveModelResult>
   onAddTableToModel: (modelId: string, ref: TableRef) => void
-  onRemoveTableFromModel: (modelId: string, modelTableId: string) => void
+  onRemoveTableFromModel: (modelId: string, modelTableId: string) => Promise<RemoveModelTableResult>
   onMoveModelTable: (modelId: string, modelTableId: string, position: { x: number; y: number }) => void
   onCreateRelationship: (modelId: string, input: RelationshipConfigInput) => Promise<RelationshipDiagnostic[]>
   onUpdateRelationship: (modelId: string, relationshipId: string, changes: RelationshipConfigInput) => Promise<RelationshipDiagnostic[]>
@@ -52,13 +52,13 @@ interface NotebookCellProps {
     calculatedColumnId: string,
     patch: { name?: string; expression?: string },
   ) => Promise<{ calculatedColumn?: CalculatedColumn; execution?: CalculatedColumnExecution; diagnostics: ExpressionDiagnostic[] }>
-  onRemoveCalculatedColumnCell: (cellId: string) => void
+  onRemoveCalculatedColumnCell: (cellId: string) => Promise<RemovalResult>
   onUpdateMeasure: (
     modelId: string,
     measureId: string,
     patch: { name?: string; expression?: string },
   ) => Promise<{ measure?: Measure; execution?: MeasureExecution; diagnostics: ExpressionDiagnostic[] }>
-  onRemoveMeasureCell: (cellId: string) => void
+  onRemoveMeasureCell: (cellId: string) => Promise<RemovalResult>
   currentValidationRuns: Record<string, ValidationRun>
   staleTestCellIds: Set<string>
   onRunValidation: (cellId: string) => void

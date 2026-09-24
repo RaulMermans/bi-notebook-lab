@@ -29,16 +29,19 @@ A learner progresses through executable cells that expose data modeling and anal
 ## Current supported scope
 
 The "Initial supported scope" below described the Sprint 1–2 starting point.
-Sprints 3–14 have since shipped well past it — calculated columns, measures,
+Sprints 3–15 have since shipped well past it — calculated columns, measures,
 CALCULATE, iterators/table expressions, classic time intelligence, advanced
 relationships (USERELATIONSHIP/CROSSFILTER), a Power Query transformation
 layer (Sprint 12, see docs/POWER_QUERY_RUNTIME.md), a lesson-based
-Learning System (Sprint 13, see docs/LEARNING_SYSTEM.md), and advanced
+Learning System (Sprint 13, see docs/LEARNING_SYSTEM.md), advanced
 Applied Steps plus Direct Query Validation and multi-checkpoint lessons
 (Sprint 14, see docs/APPLIED_STEPS.md, docs/QUERY_VALIDATION.md and
-docs/LEARNING_SYSTEM.md) all exist in-repo. Treat this list as scope
-history, not a current restriction — check ROADMAP.md for what has actually
-shipped before assuming something is out of scope.
+docs/LEARNING_SYSTEM.md), and workspace referential integrity plus the rest
+of the essential DAX subset (Sprint 15, see docs/WORKSPACE_INTEGRITY.md,
+docs/EXPRESSION_ENGINE.md and docs/SEMANTIC_CONFORMANCE.md) all exist
+in-repo. Treat this list as scope history, not a current restriction —
+check ROADMAP.md for what has actually shipped before assuming something is
+out of scope.
 
 Delivered:
 
@@ -63,6 +66,21 @@ Delivered:
   built-in lessons), generalized to any number of independent per-lesson
   checkpoints and a 4th built-in lesson graded purely through Direct Query
   Validation (Sprint 14 — see docs/LEARNING_SYSTEM.md)
+- Workspace Referential Integrity: every destructive `NotebookRuntime`
+  mutation (delete model/dataset/query/measure/calculated column, disable a
+  query's load, remove a model table) enforces a RESTRICT/CASCADE policy
+  internally before mutating, guaranteeing no cell/model object/query can
+  ever point at a deleted id (Sprint 15, see docs/WORKSPACE_INTEGRITY.md)
+- Essential DAX closure: `VAR`/`RETURN` (scalar-only, correct lexical
+  scoping), `ISBLANK`, `HASONEVALUE`, and a bounded
+  `KEEPFILTERS(Table[Column] = value)` (Sprint 15, see
+  docs/EXPRESSION_ENGINE.md "Variables (VAR/RETURN)", docs/MEASURES.md and
+  docs/CALCULATE.md)
+- Semantic Conformance Suite: 83 hand-verified DAX cases across 10 families,
+  run through the real public runtime APIs, honestly labeled by provenance
+  (no `power-bi-verified` claims yet) and with one documented known
+  divergence (Sprint 15, see docs/SEMANTIC_CONFORMANCE.md; `npm run
+  conformance`)
 
 Still avoid (no roadmap phase has required these):
 
@@ -77,7 +95,13 @@ Still avoid (no roadmap phase has required these):
   boundary"; this is ROADMAP.md Phase 10, not yet started)
 - Calculated Tables / CALENDAR/CALENDARAUTO / SELECTCOLUMNS/ADDCOLUMNS/
   SUMMARIZE (evaluated as a Sprint 14 candidate and deliberately deferred —
-  see ROADMAP.md "Recommended Sprint 15")
+  see ROADMAP.md "Recommended Sprint 16")
+- table-valued VAR, CALCULATETABLE, and full DAX blank-coercion semantics
+  beyond what's implemented (Sprint 15 deliberately scoped VAR to
+  scalar-only and left arithmetic's uniform blank-propagation behavior
+  alone rather than replicating DAX's per-operator coercion table — see
+  docs/EXPRESSION_ENGINE.md and docs/SEMANTIC_CONFORMANCE.md's `blank-008`
+  known divergence)
 - Power BI Service/Fabric
 - deployment infrastructure
 - authentication

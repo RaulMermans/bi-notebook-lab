@@ -4,6 +4,7 @@ import type { Dataset } from '../../domain/data'
 import type { CalculatedColumn, SemanticModel } from '../../domain/model'
 import type { ExpressionDiagnostic } from '../../expression/diagnostics'
 import { evaluateCalculatedColumn, type CalculatedColumnExecution } from '../../runtime/calculatedColumn/calculatedColumnRuntime'
+import type { RemovalResult } from '../../runtime/notebook/notebookRuntime'
 import { resolveTableRef } from '../../runtime/model/modelRuntime'
 import { CalculatedColumnPreview } from './calculatedColumn/CalculatedColumnPreview'
 import { ExpressionEditor } from './calculatedColumn/ExpressionEditor'
@@ -17,7 +18,7 @@ interface CalculatedColumnCellCardProps {
     name?: string
     expression?: string
   }) => Promise<{ calculatedColumn?: CalculatedColumn; execution?: CalculatedColumnExecution; diagnostics: ExpressionDiagnostic[] }>
-  onRemove: () => void
+  onRemove: () => Promise<RemovalResult>
 }
 
 /**
@@ -33,6 +34,7 @@ export function CalculatedColumnCellCard({ cell, model, datasets, onUpdate, onRe
   const [runDiagnostics, setRunDiagnostics] = useState<ExpressionDiagnostic[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
+  const [removeWarning, setRemoveWarning] = useState<string | null>(null)
 
   useEffect(() => {
     setDraftExpression(calculatedColumn?.expression ?? '')
@@ -73,6 +75,19 @@ export function CalculatedColumnCellCard({ cell, model, datasets, onUpdate, onRe
     }
   }
 
+  const columnName = calculatedColumn.name
+
+  async function handleRemove() {
+    const result = await onRemove()
+    if (!result.removed) {
+      setRemoveWarning(
+        result.blockers && result.blockers.length > 0
+          ? `Can't remove "${columnName}": ${result.blockers.map((b) => b.reason).join(' ')}`
+          : `Can't remove "${columnName}".`,
+      )
+    }
+  }
+
   const selectedTrace =
     selectedRowIndex !== null ? execution?.previewTraces.find((t) => t.rowIndex === selectedRowIndex) : undefined
 
@@ -97,11 +112,13 @@ export function CalculatedColumnCellCard({ cell, model, datasets, onUpdate, onRe
             <button type="button" className="text-button" onClick={() => setExpanded((v) => !v)}>
               {expanded ? 'Collapse' : 'Expand'}
             </button>
-            <button type="button" className="text-button" onClick={onRemove}>
+            <button type="button" className="text-button" onClick={handleRemove}>
               Remove
             </button>
           </div>
         </div>
+
+        {removeWarning && <p className="import-panel__error" role="alert">{removeWarning}</p>}
 
         <pre className="calculated-column-expression-preview">
           <code>{calculatedColumn.expression}</code>

@@ -50,9 +50,10 @@ Sprint 9 (Iterators, Table Expressions & Conditional Logic), Sprint 10
 (Date Tables & Classic Time Intelligence), Sprint 11 (Advanced
 Relationships & `USERELATIONSHIP`/`CROSSFILTER`), Sprint 12 (Power
 Query & Data Transformation Runtime), Sprint 13 (Learning System —
-lesson catalog, guided stages, hints, progress) and Sprint 14 (Advanced
-Applied Steps, Direct Query Validation, and Multi-Checkpoint Lessons) are
-complete — the full MVP
+lesson catalog, guided stages, hints, progress), Sprint 14 (Advanced
+Applied Steps, Direct Query Validation, and Multi-Checkpoint Lessons) and
+Sprint 15 (Workspace Referential Integrity, Essential DAX Closure, and a
+Semantic Conformance Suite) are complete — the full MVP
 learning loop (import → model → calculated columns → measures → filter
 context manipulation → visualize → validate) now works end to end, with real
 row-iterating DAX (`SUMX`/`AVERAGEX`/`MINX`/`MAXX`/`COUNTX`), conditional
@@ -214,6 +215,36 @@ relationship model on top. This repository now contains:
   Applied Step kinds it uses) without requiring a Semantic Model at all. See
   [`docs/QUERY_VALIDATION.md`](./docs/QUERY_VALIDATION.md).
 
+- **Workspace Referential Integrity** — every destructive `NotebookRuntime`
+  mutation (delete dataset/model/query/measure/calculated column, disable a
+  query's load, remove a model table) is now checked against a real
+  RESTRICT/CASCADE policy *before* it's allowed to happen: deleting a Model
+  cascades its owned cells cleanly, while deleting a Dataset/Query/Measure/
+  Calculated Column that something else still depends on is blocked with a
+  specific, learner-visible reason instead of silently orphaning a reference.
+  `validateWorkspaceIntegrity` guarantees no cell/model object/query can ever
+  point at something deleted after a successful mutation. See
+  [`docs/WORKSPACE_INTEGRITY.md`](./docs/WORKSPACE_INTEGRITY.md).
+- **Essential DAX Closure** — `VAR`/`RETURN` (scalar-only, correct lexical
+  scoping, forward-reference rejection, works anywhere the ordinary
+  expression binder reaches — not inside a `CALCULATE` filter predicate or
+  an iterator's row expression), `ISBLANK`, `HASONEVALUE`, and a bounded
+  `KEEPFILTERS(Table[Column] = value)` (same-column intersect instead of
+  `CALCULATE`'s normal same-column replace) close out the DAX subset's most
+  commonly-missing pieces. See
+  [`docs/EXPRESSION_ENGINE.md`](./docs/EXPRESSION_ENGINE.md) "Variables
+  (VAR/RETURN)", [`docs/MEASURES.md`](./docs/MEASURES.md) and
+  [`docs/CALCULATE.md`](./docs/CALCULATE.md).
+- **Semantic Conformance Suite** — 83 hand-verified DAX cases across 10
+  families (scalar arithmetic, blanks, variables, aggregations, filter
+  context, `CALCULATE`, iterators, relationships, time intelligence,
+  advanced relationships), run through the real public runtime APIs and
+  compared against independently-derived expected values, answering "is the
+  supported DAX subset actually correct," not just "does the code do what
+  the tests told it to." One documented known divergence (`BLANK() + 5`).
+  Run with `npm run conformance`. See
+  [`docs/SEMANTIC_CONFORMANCE.md`](./docs/SEMANTIC_CONFORMANCE.md).
+
 Calendar-based (Auto date/time) time intelligence, `TREATAS`, composite
 models, full DAX compatibility, calculated tables, and an arbitrary Power
 Query M parser/interpreter (Sprint 12/14 implement typed Applied Steps and a
@@ -337,6 +368,8 @@ match.
 - [`docs/POWER_QUERY_EXPRESSIONS.md`](./docs/POWER_QUERY_EXPRESSIONS.md)
 - [`docs/LEARNING_SYSTEM.md`](./docs/LEARNING_SYSTEM.md)
 - [`docs/QUERY_VALIDATION.md`](./docs/QUERY_VALIDATION.md)
+- [`docs/WORKSPACE_INTEGRITY.md`](./docs/WORKSPACE_INTEGRITY.md)
+- [`docs/SEMANTIC_CONFORMANCE.md`](./docs/SEMANTIC_CONFORMANCE.md)
 
 ## Scope guardrail
 

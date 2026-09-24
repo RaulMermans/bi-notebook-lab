@@ -119,6 +119,31 @@ export interface TableReferenceNode {
   span: SourceSpan
 }
 
+/**
+ * Sprint 15 (VAR/RETURN — see docs/EXPRESSION_ENGINE.md "Variables").
+ * A variable *reference* has no dedicated node: DAX writes it as a bare
+ * name (`Revenue`, not `[Revenue]`), which already parses as a
+ * `TableReferenceNode` — the same "parser accepts unconditionally, binder
+ * decides legality" precedent that node already documents. The binder
+ * resolves a `TableReferenceNode` to a variable when its name matches a
+ * declaration in scope, and to the existing bare-table-reference behavior
+ * otherwise.
+ */
+export interface VariableDeclarationNode {
+  name: string
+  nameSpan: SourceSpan
+  value: Expression
+}
+
+export interface VarReturnExpressionNode {
+  kind: 'VarReturn'
+  /** One or more `VAR name = expr` declarations, in source order. */
+  variables: VariableDeclarationNode[]
+  /** The `RETURN` expression. */
+  body: Expression
+  span: SourceSpan
+}
+
 export type Expression =
   | LiteralNode
   | ColumnReferenceNode
@@ -128,3 +153,4 @@ export type Expression =
   | TableReferenceNode
   | ComparisonExpressionNode
   | LogicalExpressionNode
+  | VarReturnExpressionNode

@@ -136,3 +136,20 @@ V1 is complete when a learner can:
 > feature, is an unrelated, internally-named concept — it grades a Power
 > Query output directly, and has nothing to do with Power BI's DirectQuery
 > connectivity mode.)
+>
+> Sprint 15 closes out the DAX subset's most commonly-missing pieces —
+> `VAR`/`RETURN` (scalar-only, correct lexical scoping), `ISBLANK`,
+> `HASONEVALUE`, and a bounded `KEEPFILTERS(Table[Column] = value)` — see
+> [`docs/EXPRESSION_ENGINE.md`](./docs/EXPRESSION_ENGINE.md) "Variables
+> (VAR/RETURN)" and [`docs/CALCULATE.md`](./docs/CALCULATE.md). It also adds
+> two trust/quality features that aren't new DAX surface but are still part
+> of the product contract: **Workspace Referential Integrity** (every
+> destructive mutation — deleting a model, dataset, query, measure, or
+> calculated column — is checked against a RESTRICT/CASCADE policy before
+> it's allowed, so a learner's workspace can never end up with a cell
+> pointing at something that no longer exists — see
+> [`docs/WORKSPACE_INTEGRITY.md`](./docs/WORKSPACE_INTEGRITY.md)) and a
+> **Semantic Conformance Suite** (83 hand-verified DAX cases proving the
+> supported subset behaves the way real DAX does, not just the way the code
+> happens to — see
+> [`docs/SEMANTIC_CONFORMANCE.md`](./docs/SEMANTIC_CONFORMANCE.md)).

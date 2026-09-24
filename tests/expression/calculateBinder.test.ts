@@ -177,9 +177,22 @@ describe('CALCULATE binder diagnostics', () => {
     expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'INVALID_ALL_ARGUMENT' })])
   })
 
-  it('rejects KEEPFILTERS as a CALCULATE filter argument', () => {
+  it('Sprint 15: binds a bounded KEEPFILTERS(Table[Column] = value) to a keepFilters ReplaceColumnFilter modifier', () => {
     const { model, datasets } = baseModel()
     const result = bindMeasure(model, datasets, 'CALCULATE([Total Revenue], KEEPFILTERS(Customers[Country] = "Spain"))')
+    expect(result.diagnostics).toEqual([])
+    expect((result.bound as any).modifiers[0]).toMatchObject({ kind: 'ReplaceColumnFilter', keepFilters: true })
+  })
+
+  it('Sprint 15: rejects KEEPFILTERS around an unsupported (non-equality) shape', () => {
+    const { model, datasets } = baseModel()
+    const result = bindMeasure(model, datasets, 'CALCULATE([Total Revenue], KEEPFILTERS(Sales[Revenue] > 50))')
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'UNSUPPORTED_KEEPFILTERS_SHAPE' }))
+  })
+
+  it('Sprint 15: still rejects KEEPFILTERS used standalone (outside CALCULATE)', () => {
+    const { model, datasets } = baseModel()
+    const result = bindMeasure(model, datasets, 'KEEPFILTERS(Customers[Country] = "Spain")')
     expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'UNSUPPORTED_FUNCTION' })])
   })
 

@@ -2,7 +2,7 @@ import type { DataType, Dataset } from '../domain/data'
 import type { ColumnRef, ModelTable, SemanticModel } from '../domain/model'
 import { resolveTableRef, type ResolvedTableRef } from '../runtime/model/modelRuntime'
 import type { ComparisonOperator, LogicalOperator } from './ast'
-import type { BinaryOperator, ColumnReferenceNode, Expression, FunctionCallNode, SourceSpan, UnaryOperator } from './ast'
+import type { BinaryOperator, ColumnReferenceNode, Expression, FunctionCallNode, SourceSpan, TableReferenceNode, UnaryOperator, VarReturnExpressionNode } from './ast'
 import { diagnostic, type ExpressionDiagnostic } from './diagnostics'
 import { resolveRelatedRelationship, type RelatedFailureCode } from './relatedLookup'
 
@@ -95,6 +95,36 @@ export interface BoundBlank {
   span: SourceSpan
 }
 
+/** Sprint 15 (ISBLANK) — one-arg, no context dependency, valid in both calculated columns and measures. */
+export interface BoundIsBlank {
+  kind: 'IsBlank'
+  operand: BoundExpression
+  span: SourceSpan
+}
+
+/**
+ * Sprint 15 (VAR/RETURN). A bare name resolved to a declared variable — see
+ * `ast.ts`'s `VarReturnExpressionNode` doc for why there's no dedicated
+ * variable-reference AST node (it reuses `TableReferenceNode`).
+ */
+export interface BoundVariableReference {
+  kind: 'VariableReference'
+  name: string
+  span: SourceSpan
+}
+
+export interface BoundVariableDeclaration {
+  name: string
+  value: BoundExpression
+}
+
+export interface BoundVarReturn {
+  kind: 'VarReturn'
+  variables: BoundVariableDeclaration[]
+  body: BoundExpression
+  span: SourceSpan
+}
+
 export type BoundExpression =
   | BoundLiteral
   | BoundColumnReference
@@ -106,6 +136,9 @@ export type BoundExpression =
   | BoundIf
   | BoundSwitch
   | BoundBlank
+  | BoundVariableReference
+  | BoundVarReturn
+  | BoundIsBlank
 
 export interface BindContext {
   model: SemanticModel
@@ -124,6 +157,18 @@ interface ResolvedBindContext {
   datasets: Record<string, Dataset>
   currentTable: ModelTable
   currentResolved: ResolvedTableRef
+  /**
+   * Sprint 15 (VAR/RETURN): variables visible at this point, keyed
+   * lowercase. Threaded through `ctx` like every other field — a `VarReturn`
+   * node builds a locally-extended copy for its own declarations/body only
+   * (never mutates this map), so scope stays lexical without touching any
+   * other recursive call site in this file.
+   */
+  variables: Map<string, BoundExpression>
+  /** Names declared later in the *current* (innermost) VAR block, not yet resolved — referencing one is a forward reference, including self-reference. */
+  pendingVariables: Set<string>
+  /** True once inside any VAR/RETURN block — an unresolved bare name gets the friendlier `UNKNOWN_VARIABLE` message instead of `BARE_TABLE_REFERENCE`. */
+  inVariableScope: boolean
 }
 
 export function findModelTableByName(model: SemanticModel, datasets: Record<string, Dataset>, name: string): ModelTable | undefined {
@@ -272,6 +317,14 @@ function bindFunctionCall(node: FunctionCallNode, ctx: ResolvedBindContext): Bin
     }
     return { bound: { kind: 'Blank', span: node.span }, diagnostics: [] }
   }
+  if (name === 'ISBLANK') {
+    if (node.args.length !== 1) {
+      return { diagnostics: [diagnostic('error', 'INVALID_FUNCTION_ARGUMENT', 'ISBLANK expects exactly one argument, e.g. ISBLANK(Sales[Revenue]).', node.span)] }
+    }
+    const operand = bindNode(node.args[0], ctx)
+    if (!operand.bound) return { diagnostics: operand.diagnostics }
+    return { bound: { kind: 'IsBlank', operand: operand.bound, span: node.span }, diagnostics: operand.diagnostics }
+  }
 
   if (name !== 'RELATED') {
     return {
@@ -279,7 +332,7 @@ function bindFunctionCall(node: FunctionCallNode, ctx: ResolvedBindContext): Bin
         diagnostic(
           'error',
           'UNSUPPORTED_FUNCTION',
-          `"${node.name}" is not supported in calculated columns. Supported: RELATED(Table[Column]), IF, SWITCH, BLANK().`,
+          `"${node.name}" is not supported in calculated columns. Supported: RELATED(Table[Column]), IF, SWITCH, BLANK(), ISBLANK().`,
           node.nameSpan,
         ),
       ],
@@ -353,6 +406,101 @@ function bindFunctionCall(node: FunctionCallNode, ctx: ResolvedBindContext): Bin
   }
 }
 
+const INVALID_VARIABLE_NAME = /^(VAR|RETURN)$/i
+
+/**
+ * Sprint 15 (VAR/RETURN, scalar-only — see docs/EXPRESSION_ENGINE.md
+ * "Variables"). Binds each declaration in source order under an
+ * *accumulating* scope — a later VAR may reference an earlier one, but not
+ * vice versa (`pendingVariables` makes a forward/self-reference fail as
+ * `FORWARD_VARIABLE_REFERENCE` in `bindTableReference` rather than a
+ * confusing generic error) — then binds `body` with every declared
+ * variable visible.
+ */
+function bindVarReturn(node: VarReturnExpressionNode, ctx: ResolvedBindContext): BindResult {
+  const diagnostics: ExpressionDiagnostic[] = []
+  const declaredNames = new Set<string>()
+  const pendingVariables = new Set<string>()
+
+  for (const decl of node.variables) {
+    const lower = decl.name.toLowerCase()
+    if (INVALID_VARIABLE_NAME.test(decl.name)) {
+      diagnostics.push(diagnostic('error', 'INVALID_VARIABLE_NAME', `"${decl.name}" can't be used as a variable name.`, decl.nameSpan, { name: decl.name }))
+      continue
+    }
+    if (declaredNames.has(lower)) {
+      diagnostics.push(diagnostic('error', 'DUPLICATE_VARIABLE', `Variable "${decl.name}" is already declared in this VAR block.`, decl.nameSpan, { name: decl.name }))
+      continue
+    }
+    declaredNames.add(lower)
+    pendingVariables.add(lower)
+  }
+
+  let variables = ctx.variables
+  const boundDeclarations: BoundVariableDeclaration[] = []
+  const resolvedNames = new Set<string>()
+
+  for (const decl of node.variables) {
+    const lower = decl.name.toLowerCase()
+    if (resolvedNames.has(lower) || INVALID_VARIABLE_NAME.test(decl.name)) continue
+    resolvedNames.add(lower)
+
+    // Still pending while binding its own value — a self-reference (`VAR x = x + 1`)
+    // must read as forward-reference, not "unknown," so the delete happens after.
+    const declResult = bindNode(decl.value, { ...ctx, variables, pendingVariables, inVariableScope: true })
+    pendingVariables.delete(lower)
+    diagnostics.push(...declResult.diagnostics)
+    if (declResult.bound) {
+      variables = new Map(variables)
+      variables.set(lower, declResult.bound)
+      boundDeclarations.push({ name: decl.name, value: declResult.bound })
+    }
+  }
+
+  const bodyResult = bindNode(node.body, { ...ctx, variables, pendingVariables: new Set(), inVariableScope: true })
+  diagnostics.push(...bodyResult.diagnostics)
+  if (!bodyResult.bound) return { diagnostics }
+
+  return { bound: { kind: 'VarReturn', variables: boundDeclarations, body: bodyResult.bound, span: node.span }, diagnostics }
+}
+
+function bindTableReference(node: TableReferenceNode, ctx: ResolvedBindContext): BindResult {
+  const lower = node.table.toLowerCase()
+
+  const variable = ctx.variables.get(lower)
+  if (variable) {
+    return { bound: { kind: 'VariableReference', name: node.table, span: node.span }, diagnostics: [] }
+  }
+  if (ctx.pendingVariables.has(lower)) {
+    return {
+      diagnostics: [
+        diagnostic(
+          'error',
+          'FORWARD_VARIABLE_REFERENCE',
+          `"${node.table}" can't be used here — a VAR can only reference variables declared earlier in the same VAR block, not itself or one declared later.`,
+          node.span,
+          { name: node.table },
+        ),
+      ],
+    }
+  }
+  if (ctx.inVariableScope) {
+    return { diagnostics: [diagnostic('error', 'UNKNOWN_VARIABLE', `Unknown variable "${node.table}".`, node.span, { name: node.table })] }
+  }
+
+  return {
+    diagnostics: [
+      diagnostic(
+        'error',
+        'BARE_TABLE_REFERENCE',
+        `"${node.table}" is a table, not a value. A calculated column can only read a column (e.g. "${node.table}[Column]") or use RELATED to reach another table.`,
+        node.span,
+        { table: node.table },
+      ),
+    ],
+  }
+}
+
 function bindNode(node: Expression, ctx: ResolvedBindContext): BindResult {
   switch (node.kind) {
     case 'NumberLiteral':
@@ -384,17 +532,10 @@ function bindNode(node: Expression, ctx: ResolvedBindContext): BindResult {
       return bindFunctionCall(node, ctx)
 
     case 'TableReference':
-      return {
-        diagnostics: [
-          diagnostic(
-            'error',
-            'BARE_TABLE_REFERENCE',
-            `"${node.table}" is a table, not a value. A calculated column can only read a column (e.g. "${node.table}[Column]") or use RELATED to reach another table.`,
-            node.span,
-            { table: node.table },
-          ),
-        ],
-      }
+      return bindTableReference(node, ctx)
+
+    case 'VarReturn':
+      return bindVarReturn(node, ctx)
 
     // Sprint 8 added `=`/`<>`/`>`/`>=`/`<`/`<=`/`&&`/`||` to the shared grammar for CALCULATE's
     // boolean filter arguments (measure context). Sprint 9 extends calculated columns to support
@@ -435,5 +576,13 @@ export function bind(expression: Expression, ctx: BindContext): BindResult {
     }
   }
 
-  return bindNode(expression, { model: ctx.model, datasets: ctx.datasets, currentTable, currentResolved })
+  return bindNode(expression, {
+    model: ctx.model,
+    datasets: ctx.datasets,
+    currentTable,
+    currentResolved,
+    variables: new Map(),
+    pendingVariables: new Set(),
+    inVariableScope: false,
+  })
 }

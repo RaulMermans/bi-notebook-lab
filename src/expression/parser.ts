@@ -5,6 +5,7 @@ import type {
   Expression,
   LogicalOperator,
   SourceSpan,
+  VariableDeclarationNode,
 } from './ast'
 import { diagnostic, type ExpressionDiagnostic } from './diagnostics'
 import { LexError, tokenize, type Token, type TokenType } from './lexer'
@@ -56,7 +57,40 @@ class Parser {
   }
 
   private parseExpression(): Expression {
+    if (this.peek().type === 'identifier' && this.peek().text.toUpperCase() === 'VAR') {
+      return this.parseVarReturn()
+    }
     return this.parseOr()
+  }
+
+  /**
+   * Sprint 15: `VAR name1 = expr1 [VAR name2 = expr2 ...] RETURN body`.
+   * `VAR`/`RETURN` are ordinary identifiers detected by text, exactly like
+   * `TRUE`/`FALSE` above — no lexer/keyword-table change. Hooking this at
+   * the top of `parseExpression()` (rather than only at the top of a whole
+   * program) means it nests for free anywhere an expression is accepted —
+   * function arguments included, since `functionCall()` parses each
+   * argument via `parseExpression()`.
+   */
+  private parseVarReturn(): Expression {
+    const start = this.peek().span.start
+    const variables: VariableDeclarationNode[] = []
+
+    while (this.peek().type === 'identifier' && this.peek().text.toUpperCase() === 'VAR') {
+      this.advance() // VAR
+      const nameToken = this.expect('identifier', 'a variable name')
+      this.expect('=', '"="')
+      const value = this.parseExpression()
+      variables.push({ name: nameToken.text, nameSpan: nameToken.span, value })
+    }
+
+    if (!(this.peek().type === 'identifier' && this.peek().text.toUpperCase() === 'RETURN')) {
+      throw new ParseError('Expected RETURN after variable declarations.', this.peek().span)
+    }
+    this.advance() // RETURN
+    const body = this.parseExpression()
+
+    return { kind: 'VarReturn', variables, body, span: { start, end: body.span.end } }
   }
 
   /** Lowest precedence: `||`. See docs/CALCULATE.md "Operator precedence". */

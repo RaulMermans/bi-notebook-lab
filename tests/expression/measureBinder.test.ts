@@ -195,4 +195,20 @@ describe('bindMeasureExpression', () => {
     expect(result.diagnostics).toEqual([])
     expect(result.bound).toMatchObject({ kind: 'Aggregation', function: 'SUM', column: { kind: 'calculated' } })
   })
+
+  it('Sprint 15: binds ISBLANK around a measure reference', () => {
+    const { model, datasets, salesTableId } = baseModel()
+    const withMeasure: SemanticModel = { ...model, measures: [fakeMeasure('m1', 'Total Revenue', salesTableId)] }
+    const result = bindMeasure(withMeasure, datasets, 'ISBLANK([Total Revenue])')
+
+    expect(result.diagnostics).toEqual([])
+    expect(result.bound).toMatchObject({ kind: 'IsBlank' })
+  })
+
+  it('Sprint 15: rejects ISBLANK with the wrong arity in measure context', () => {
+    const { model, datasets } = baseModel()
+    const result = bindMeasure(model, datasets, 'ISBLANK()')
+
+    expect(result.diagnostics).toEqual([expect.objectContaining({ code: 'INVALID_FUNCTION_ARGUMENT' })])
+  })
 })

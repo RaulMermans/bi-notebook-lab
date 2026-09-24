@@ -280,6 +280,8 @@ surfaced in the Context Explorer via `ContextDetailsPanel.tsx`'s
 - 1:1 `USERELATIONSHIP` direction semantics are bounded exactly as described
   above (arg2 filters arg1) — this does not attempt to model every possible
   Power BI 1:1 relationship-argument edge case.
-- No `TREATAS`, `CALCULATETABLE`, `KEEPFILTERS`, `ALLEXCEPT`, `ALLSELECTED` —
-  explicitly out of scope (still rejected via
-  `UNSUPPORTED_CALCULATE_ADJACENT_FUNCTIONS`).
+- No `TREATAS`, `CALCULATETABLE`, `ALLEXCEPT`, `ALLSELECTED` — explicitly
+  out of scope (still rejected via
+  `UNSUPPORTED_CALCULATE_ADJACENT_FUNCTIONS`). **`KEEPFILTERS` is now
+  implemented** (Sprint 15), bounded to a direct equality shape — see
+  [`docs/CALCULATE.md`](./CALCULATE.md) "KEEPFILTERS (Sprint 15)".

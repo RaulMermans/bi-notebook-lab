@@ -1,13 +1,13 @@
-# Expression Engine (Sprint 3 + Sprint 4 + Sprint 8)
+# Expression Engine (Sprint 3 + Sprint 4 + Sprint 8 + Sprint 15)
 
 This document describes the reusable expression system introduced in
 Sprint 3 to execute calculated-column formulas, how Sprint 4 (Measures)
-extends it with aggregation and filter-context semantics, and how Sprint 8
+extends it with aggregation and filter-context semantics, how Sprint 8
 (`CALCULATE`) extends the *same* grammar a second time with comparison/
-logical operators — all without introducing a second parser. See
-[`MEASURES.md`](./MEASURES.md), [`FILTER_CONTEXT.md`](./FILTER_CONTEXT.md)
-and [`CALCULATE.md`](./CALCULATE.md) for the runtime built on top of this
-engine.
+logical operators, and how Sprint 15 adds `VAR`/`RETURN` and `ISBLANK` —
+still without introducing a second parser. See [`MEASURES.md`](./MEASURES.md),
+[`FILTER_CONTEXT.md`](./FILTER_CONTEXT.md) and [`CALCULATE.md`](./CALCULATE.md)
+for the runtime built on top of this engine.
 
 ## Pipeline
 
@@ -117,6 +117,15 @@ is implemented as of Sprint 10 (measure mode only) — see
 [`docs/TIME_INTELLIGENCE.md`](./TIME_INTELLIGENCE.md); calendar-based time
 intelligence remains out of scope for both modes.
 
+Sprint 15 adds `VAR`/`RETURN` (both binder modes) and `ISBLANK` (both binder
+modes), plus `HASONEVALUE` and a bounded `KEEPFILTERS` (measure mode only) —
+see "Variables (VAR/RETURN)" below and [`MEASURES.md`](./MEASURES.md)/
+[`CALCULATE.md`](./CALCULATE.md) for the measure-only additions. `VAR`/
+`RETURN` needed exactly one parser addition (`parseVarReturn()`, hooked at
+the top of `parseExpression()`) and zero grammar changes for `ISBLANK`/
+`HASONEVALUE`/`KEEPFILTERS` — they're ordinary `FunctionCallNode`s, the same
+pattern every function since Sprint 4 has followed.
+
 ## AST (`src/expression/ast.ts`)
 
 ```text
@@ -129,7 +138,12 @@ Expression =
   | TableReferenceNode   { table: string }
   | ComparisonExpressionNode { operator: '='|'<>'|'>'|'>='|'<'|'<='; left; right }  // Sprint 8
   | LogicalExpressionNode    { operator: '&&'|'\|\|'; left; right }                  // Sprint 8
+  | VarReturnExpressionNode  { variables: VariableDeclarationNode[]; body: Expression; span }  // Sprint 15
 ```
+
+`VarReturnExpressionNode` is a Sprint 15 addition — see "Variables
+(VAR/RETURN)" below for its grammar, scoping rules, and the (important,
+non-obvious) reason there is no separate "variable reference" node kind.
 
 `ComparisonExpressionNode`/`LogicalExpressionNode` are a Sprint 8 addition —
 see [`CALCULATE.md`](./CALCULATE.md) "Operator precedence" for the full
@@ -285,6 +299,9 @@ type ExpressionDiagnosticCode =
   | 'BOOLEAN_FILTER_MULTIPLE_TABLES' | 'BOOLEAN_FILTER_MEASURE_REFERENCE' | 'BOOLEAN_FILTER_NESTED_CALCULATE'
   | 'FILTER_PREDICATE_NOT_BOOLEAN' | 'FILTER_ROW_CONTEXT_VIOLATION'
   | 'INVALID_REMOVEFILTERS_ARGUMENT' | 'INVALID_ALL_ARGUMENT' | 'CALCULATE_CONTEXT_TRANSITION_NOT_SUPPORTED'
+  // Sprint 15 (VAR/RETURN, KEEPFILTERS) — see "Variables (VAR/RETURN)" below and docs/CALCULATE.md
+  | 'DUPLICATE_VARIABLE' | 'UNKNOWN_VARIABLE' | 'FORWARD_VARIABLE_REFERENCE' | 'INVALID_VARIABLE_NAME'
+  | 'TABLE_VARIABLE_NOT_SUPPORTED' | 'UNSUPPORTED_KEEPFILTERS_SHAPE'
 ```
 
 `UNSUPPORTED_FUNCTION` (calling anything other than `RELATED`, or an
@@ -306,6 +323,196 @@ depend on an actual row's values, not just static structure.
 describes a problem with the *model's* relationship graph, not a specific
 piece of the measure's expression.
 
+## Variables (VAR/RETURN)
+
+Sprint 15 adds `VAR`/`RETURN` to both binder modes (calculated columns and
+measures), sharing the exact same parser/AST/evaluator machinery as
+everything above it — no second expression system.
+
+### Grammar
+
+```DAX
+VAR name1 = expr1
+VAR name2 = expr2
+RETURN
+  bodyExpr
+```
+
+One or more `VAR name = expr` declarations followed by `RETURN bodyExpr`.
+`parseVarReturn()` is hooked at the very top of `parseExpression()` —
+it detects the `VAR`/`RETURN` keywords by checking `token.text.toUpperCase()`
+on a plain `identifier` token, the exact same technique the parser already
+used for `TRUE`/`FALSE` (no lexer or keyword-table change). Because it's
+implemented as an ordinary `parseExpression()` case — not a separate
+"program level" construct sitting above expressions — and each declaration's
+value and the body are themselves parsed via ordinary recursive
+`parseExpression()` calls, `VAR`/`RETURN` nests for free anywhere an
+expression is already accepted, including inside a function's arguments:
+
+```DAX
+DIVIDE(
+    VAR Revenue = [Total Revenue]
+    VAR Cost = [Total Cost]
+    RETURN Revenue - Cost,
+    [Total Revenue]
+)
+```
+
+A missing `RETURN` after one or more `VAR` declarations produces a
+`ParseError` with the friendly message "Expected RETURN after variable
+declarations." — it still collapses to the generic `SYNTAX_ERROR`
+diagnostic code, consistent with every other parser-level structural error
+in this codebase, but the message text is specific.
+
+### No dedicated "variable reference" AST node
+
+This is the one non-obvious design point worth calling out explicitly:
+**there is no `VariableReferenceNode` in the AST.** A DAX variable is read
+by writing its bare name (`Revenue`, never `[Revenue]`) — which already
+parses as the pre-existing `TableReferenceNode` (a bare identifier not
+followed by `[` or `(`, introduced in Sprint 4 for `COUNTROWS(Sales)`-style
+bare-table arguments). The **binder** resolves a `TableReferenceNode` to a
+variable when its name matches an in-scope declaration, exactly mirroring
+how `TableReferenceNode` already worked: the parser accepts the shape
+unconditionally, and the binder decides what it legally means in context.
+This correctly models real DAX's own bare-identifier ambiguity — a bare
+name can be a variable or a table, and which one it is depends entirely on
+what's in scope at that point in the expression, never on the token itself.
+
+### Scalar-only, explicitly enforced
+
+`VAR` values must be scalar. In a calculated column, this is automatic: the
+calculated-column binder context has no table-producing functions at all,
+so any value that successfully binds there is already guaranteed scalar. In
+a measure, `measureBinder.ts` explicitly pre-checks each declaration's value
+against a `TABLE_PRODUCING_FUNCTION_NAMES` set (`FILTER`, `VALUES`,
+`DISTINCT`, `ALL`, `ALLEXCEPT`, `ALLSELECTED`, `REMOVEFILTERS`,
+`CALCULATETABLE`, `SUMMARIZE`, `ADDCOLUMNS`, `SELECTCOLUMNS`) and rejects it
+with `TABLE_VARIABLE_NOT_SUPPORTED` before ever attempting to bind it as a
+scalar. A bare table name used directly as a VAR value (`VAR t = Sales`) is
+also specifically detected (via `findModelTableByName`) and rejected with
+the same `TABLE_VARIABLE_NOT_SUPPORTED` code, rather than falling through to
+a confusing generic error. Table-valued `VAR` is out of scope for this
+sprint — see AGENTS.md "Still avoid."
+
+### Scoping rules
+
+The binder threads three pieces of state through the bind context:
+
+```ts
+variables: Map<string, Bound*>     // declared-and-resolved, keyed lowercase
+pendingVariables: Set<string>      // declared later in the *current* block, not yet resolved
+inVariableScope: boolean
+```
+
+Binding a bare-name `TableReferenceNode` checks, in order: `variables`
+first (an already-declared variable always wins), then `pendingVariables`
+(a name declared later in the same `VAR` block — a forward reference,
+including a self-reference like `VAR x = x + 1`, is rejected with
+`FORWARD_VARIABLE_REFERENCE`), and only then falls through to the
+pre-existing measure-reference/bare-table-reference logic. This makes
+scoping **accumulating**: each declaration's own value expression can see
+every variable declared *before* it in the same block, and the `RETURN`
+body can see all of them.
+
+- **Case-insensitive**, matched the same way table/column/measure names
+  already are — `VAR Revenue` and a later `Revenue` reference match
+  regardless of case.
+- **Duplicate names** within the same block are rejected with
+  `DUPLICATE_VARIABLE`.
+- **Reserved names**: naming a variable `VAR` or `RETURN` itself is rejected
+  with `INVALID_VARIABLE_NAME`.
+- **Unresolved name**: a bare identifier that isn't a declared/pending
+  variable and doesn't resolve through the existing bare-table-reference
+  path produces `UNKNOWN_VARIABLE`.
+- Calculated columns and measures each get their own parallel bound node
+  types — `BoundVariableReference`/`BoundVarReturn` (calculated columns,
+  `binder.ts`) and `BoundMeasureVariableReference`/`BoundMeasureVarReturn`
+  (measures, `measureBinder.ts`) — mirroring how every other node kind
+  already has a calculated-column and a measure variant.
+
+### Evaluation and lexical scoping
+
+Both evaluators (`evaluator.ts` for calculated columns, `measureEvaluator.ts`
+for measures) gained a `variables: Map<string, NodeResult>` field on their
+per-evaluation context object (`EvalContext`/`MeasureEvalContext`). A
+`VarReturn` node evaluates each declaration exactly once, in order, building
+a **locally-extended copy** of that map — it never mutates the shared
+context object — and passes the extended copy only into its own recursive
+children (the remaining declaration values and the `RETURN` body). This
+matters most for `evaluator.ts`, since the same `ctx` object is reused
+across every row of a calculated column's table: mutating it in place would
+leak one row's variables into the next row's evaluation. Because the
+extended copy is only ever handed to that one `VarReturn` node's own
+subtree, sibling or later expressions never see it — correct lexical
+scoping falls out of the recursion shape for free, with no explicit
+scope-stack bookkeeping needed. A `VariableReference` read is a plain map
+lookup returning the cached `NodeResult` — a variable's value expression is
+genuinely evaluated once and referenced N times, never recomputed.
+
+**The rule that's easy to get backwards, documented because it was gotten
+right**: `CALCULATE`'s nested evaluation context (`measureEvaluator.ts`'s
+`evaluateCalculate`) resets its measure-reference `cache` to a fresh `Map`
+(pre-existing Sprint 8 behavior — a measure reference must not reuse a value
+computed under a different filter context) but **carries `variables` through
+unchanged** (`variables: ctx.variables`, the same map reference, never
+reset). A DAX variable is captured once, at its point of declaration, and is
+immune to a later context transition — a nested `CALCULATE` can change what
+a measure *reference* resolves to, but it can never retroactively change an
+already-captured variable's value. See [`CALCULATE.md`](./CALCULATE.md)
+"Variables inside CALCULATE" for the verified example. A second, related
+fix lives in `evaluateMeasureById`: when it evaluates a *different*
+measure's own bound expression (following a `[Measure Name]` reference), it
+evaluates that measure's tree under a fresh, empty `variables` map rather
+than the caller's ambient one, so a variable declared in the referencing
+measure can never leak into and shadow a same-named identifier inside the
+referenced measure's own, independent expression.
+
+### Execution trace
+
+Three new `TraceNodeKind`s: `'var-return'`, `'variable-declaration'`,
+`'variable-reference'`. A `VarReturn` node's trace wraps one
+`variable-declaration` child per `VAR` (label = the declared name, child =
+that declaration's own sub-trace, computed once) followed by the `RETURN`
+body's own trace. A `variable-reference` node is a **childless leaf** — an
+earlier implementation returned the cached `NodeResult`'s original trace
+verbatim on every reference, which re-embedded that declaration's entire
+computation subtree into the tree each time it was referenced. The result
+was still numerically correct (the cached *value* was never recomputed),
+but it visually defeated the "evaluated once, shown once" trace design goal
+with needlessly large, duplicated trace trees — found and fixed during
+manual browser verification by rebuilding a lean
+`{ kind: 'variable-reference', label, value }` leaf on every reference,
+reusing only the cached `value`/`diagnostics`/`error`.
+
+### Scope boundary
+
+`VAR`/`RETURN` works anywhere the ordinary recursive expression binder
+reaches: a measure's top-level body, inside `CALCULATE`'s own expression
+argument, inside `IF`/`SWITCH` branches, inside `DIVIDE`'s arguments — any
+position an ordinary sub-expression is bound. It does **not** work:
+
+- inside a `CALCULATE` filter-predicate argument — that's a separate,
+  narrower binder (`src/runtime/measure/booleanFilter.ts`), intentionally
+  left untouched this sprint;
+- inside an iterator's row expression (`SUMX`/`AVERAGEX`/etc.'s second
+  argument) — a third, separate binder (`src/runtime/iterator/
+  iteratorBinder.ts`), also intentionally untouched.
+
+Both of those binders have their own permissive default-case fallthrough,
+so a stray `VarReturn` node reaching either one fails gracefully with a
+structured bind error rather than crashing. This is a documented, bounded
+scope decision for Sprint 15, not an oversight — extending either binder to
+understand `VAR`/`RETURN` is a natural, separate future addition.
+
+## ISBLANK
+
+`ISBLANK(expr)` works in both binder modes — one required argument,
+evaluates to `expr === null || expr === undefined`. `BLANK`'s canonical
+runtime representation was already plain `null` everywhere in this codebase
+(see "Null/blank semantics" above), so `ISBLANK` needed no new sentinel
+value, just a comparison.
+
 ## Known incompatibilities with full DAX
 
 - `CALCULATE`/`FILTER`/`ALL`/`REMOVEFILTERS` work in measure context only —
@@ -324,3 +531,7 @@ piece of the measure's expression.
   `docs/CALCULATED_COLUMNS.md` "Dependency scope") — but a measure *can*
   aggregate a calculated column (see `MEASURES.md` "Logical column
   access").
+- `VAR`/`RETURN` (Sprint 15) is scalar-only — no table-valued variables —
+  and does not work inside a `CALCULATE` filter-predicate argument or an
+  iterator's row expression. See "Variables (VAR/RETURN)" above "Scope
+  boundary" for the full, current boundary.

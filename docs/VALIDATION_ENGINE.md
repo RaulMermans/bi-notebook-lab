@@ -10,6 +10,12 @@ directly, with no model involved at all — see "TestCell scope" below and
 [`docs/QUERY_VALIDATION.md`](./QUERY_VALIDATION.md) for that rule set's full
 reference.
 
+Sprint 15's Workspace Referential Integrity layer is a related but distinct
+concern — it guarantees a workspace's structural references stay valid
+across mutations, rather than grading a learner's semantic correctness — and
+lives entirely outside this engine; see
+[`docs/WORKSPACE_INTEGRITY.md`](./WORKSPACE_INTEGRITY.md).
+
 ## Philosophy
 
 > Validation should test semantics, not exact text. (`PRODUCT.md`)

@@ -68,7 +68,7 @@ export function NotebookBody({
           onRenameQueryStep={(queryId, stepId, name) => void actions.renameQueryStep(queryId, stepId, name)}
           onRemoveQueryStep={(queryId, stepId) => void actions.removeQueryStep(queryId, stepId)}
           onMoveQueryStep={(queryId, stepId, toIndex) => void actions.moveQueryStep(queryId, stepId, toIndex)}
-          onSetQueryLoadEnabled={(queryId, loadEnabled) => void actions.setQueryLoadEnabled(queryId, loadEnabled)}
+          onSetQueryLoadEnabled={(queryId, loadEnabled) => actions.setQueryLoadEnabled(queryId, loadEnabled)}
           onDeleteQuery={actions.deleteQuery}
           onRemoveModel={actions.removeModel}
           onAddTableToModel={actions.addTableToModel}
