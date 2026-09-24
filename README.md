@@ -1,44 +1,108 @@
 # BI Notebook Lab
 
-An interactive notebook for learning **business intelligence, data modeling and DAX-style analytical thinking by doing**.
+A browser-based sandbox for practicing Power BI concepts without requiring Power BI Desktop.
 
-The product is intentionally **not a Power BI clone**. The core mental model is closer to Jupyter:
+I built it because practicing Power BI at work required access to a shared virtual desktop environment, making experimentation inconvenient. BI Notebook Lab runs entirely in the browser, is local-first (IndexedDB, no backend), and lets you build a semantic model, write DAX, transform data with Power Query, and get automatic feedback on whether your model and measures actually behave the way you think they do.
+
+**This is not a Power BI replacement.** It implements a bounded, educational subset of Power BI's semantics — see [Semantic honesty](#semantic-honesty) below.
+
+The core mental model is closer to Jupyter than to Power BI Desktop:
 
 ```text
 Dataset → Power Query → Model → Calculated Column → Measure → Visual → Question → Test
 ```
 
-Each concept is represented as an executable notebook cell. Learners build a solution progressively and receive immediate feedback on structure, calculations and reasoning.
+Each concept is represented as an executable notebook cell. You build a solution progressively and get immediate feedback on structure, calculations and reasoning — not just whether a chart renders.
 
-## North Star
+## What you can practice
 
-> Make invisible BI concepts visible, executable and testable.
+- Power Query (typed Applied Steps: filter, dedupe, merge, append, pivot, unpivot, conditional/custom columns)
+- Semantic modeling (star schemas, generic relationships, `USERELATIONSHIP`/`CROSSFILTER`)
+- DAX (calculated columns, measures, `CALCULATE`, iterators, `VAR`/`RETURN`)
+- Filter context (row vs. filter context, propagation, a visual Context Explorer)
+- Classic time intelligence (`SAMEPERIODLASTYEAR`, `DATEADD`, `TOTALYTD`, ...)
+- Visuals (KPI, Bar, Line, Table, Slicer) wired to the real measure runtime
+- Automatic validation against a real model, not string-matching an expression
+- Guided lessons (`Exercises`) with progressive hints and multi-checkpoint grading
+- Semantic conformance — an independent correctness corpus, not just unit tests
 
-Power BI is excellent for building reports, but it is not optimized as a learning environment. BI Notebook Lab focuses on the parts that beginners usually find hardest:
+## Try it
 
-- table grain and keys
-- star schemas
-- relationships and filter propagation
-- calculated columns vs measures
-- row context vs filter context
-- common DAX patterns
-- debugging why a result is wrong
+```text
+Free Lab       open sandbox: start from a Practice Project, import a saved
+                project, or add your own CSV/Excel data
+Exercises      guided lessons with automatic checkpoint grading
+Progress       your lesson history across sessions
+```
 
-## Product surface
+A notebook can contain: `DataCell`, `QueryCell`, `ModelCell`,
+`CalculatedColumnCell`, `MeasureCell`, `VisualCell`, `TestCell`, and generic
+`markdown`/`question` cells. Every cell type has a domain contract and an
+execution contract before it exists — see `AGENTS.md`.
 
-A notebook can contain:
+## Architecture
 
-- `MarkdownCell`
-- `DataCell`
-- `QueryCell`
-- `ModelCell`
-- `CalculatedColumnCell`
-- `MeasureCell`
-- `VisualCell`
-- `QuestionCell`
-- `TestCell`
+```text
+Raw Data (CSV / Excel / built-in samples)
+   ↓
+Power Query Runtime        (typed Applied Steps, never raw M)
+   ↓
+Semantic Model              (tables, relationships, calculated columns, measures)
+   ↓
+DAX Runtime                 (expression engine: lexer → parser → binder → evaluator)
+   ↓
+Filter / Relationship Engine (row context, filter context, propagation, CALCULATE)
+   ↓
+Visuals / Context Explorer  (KPI, Bar, Line, Table, Slicer; filter-propagation trace)
+   ↓
+Validation & Learning System (automatic grading, guided lessons, progress)
+```
 
-The first product milestone is not a dashboard builder. It is a **learning runtime** capable of executing and validating these cells.
+Every layer above the browser shell is pure, framework-free TypeScript —
+"every execution result should be testable headlessly" is an enforced
+guardrail, not a suggestion (`AGENTS.md`). React only renders state; it
+never contains BI semantics. Everything runs client-side against IndexedDB
+— there is no backend, no account, no telemetry.
+
+## Feature matrix
+
+| Area | Status |
+|---|---|
+| CSV / Excel import | ✓ |
+| Power Query (typed Applied Steps, 19 kinds) | ✓ |
+| Semantic model (generic relationships, `USERELATIONSHIP`/`CROSSFILTER`) | ✓ |
+| Calculated columns | ✓ |
+| Measures | ✓ |
+| `CALCULATE` | ✓ |
+| Iterators (`SUMX`/`AVERAGEX`/...) & table expressions | ✓ |
+| `VAR`/`RETURN`, `ISBLANK`, `HASONEVALUE`, `KEEPFILTERS` | ✓ |
+| Classic time intelligence | ✓ |
+| Visuals (KPI/Bar/Line/Table/Slicer) | ✓ |
+| Context Explorer (filter-propagation trace) | ✓ |
+| Automatic validation / guided Exercises | ✓ |
+| Portable project export/import (`.bilab.json`) | ✓ |
+| Practice Projects & onboarding | ✓ |
+| Semantic conformance suite | ✓ |
+| Calculated Tables, `CALENDAR`/`CALENDARAUTO`, `SUMMARIZE` | ✗ (deferred) |
+| Full DAX / full M compatibility | ✗ (bounded subset, by design) |
+| PBIX/PBIP import, Fabric integration | ✗ (out of scope) |
+| Accounts, collaboration, backend | ✗ (out of scope) |
+
+## Semantic honesty
+
+This project implements a **bounded educational subset** of Power BI
+semantics — not full DAX, not full M, not a Power BI replacement. It backs
+that claim with a conformance suite (`npm run conformance`): 83
+hand-verified DAX cases across 10 families, run through the real runtime
+APIs, honestly labeled by provenance rather than claimed as
+`power-bi-verified`.
+
+One known divergence is tracked deliberately rather than hidden: `BLANK() +
+5` returns `BLANK()` here, where real DAX coerces blank to `0` for `+`. This
+codebase propagates blank uniformly through every arithmetic operator
+instead of replicating DAX's per-operator coercion table. See
+[`docs/SEMANTIC_CONFORMANCE.md`](./docs/SEMANTIC_CONFORMANCE.md) for the
+full list of what's verified and what's still approximate.
 
 ## Repository status
 
@@ -244,6 +308,19 @@ relationship model on top. This repository now contains:
   the tests told it to." One documented known divergence (`BLANK() + 5`).
   Run with `npm run conformance`. See
   [`docs/SEMANTIC_CONFORMANCE.md`](./docs/SEMANTIC_CONFORMANCE.md).
+- **V1 Practice UX, Performance & GitHub Release Readiness (Sprint 16)** —
+  a portable project bundle (`.bilab.json`, export/import an entire
+  workspace atomically, with stable ids and a validate-before-write
+  guarantee — see [`docs/PROJECT_BUNDLE.md`](./docs/PROJECT_BUNDLE.md));
+  four built-in Practice Projects and a Free Lab onboarding pass; a
+  performance benchmark harness with real measurements at 1k/10k/50k/100k
+  rows justifying the 100,000-row limit and the decision **not** to
+  introduce Web Workers (see
+  [`docs/PERFORMANCE.md`](./docs/PERFORMANCE.md)); React Flow/Recharts
+  moved behind `React.lazy()` plus Rollup vendor-chunk splitting, cutting
+  the main bundle from 1.15 MB to 425 kB gzip; a shared `BlockedActionNotice`
+  component and a top-level error boundary; and a release-level Playwright
+  E2E suite (see [`docs/E2E_TESTING.md`](./docs/E2E_TESTING.md)).
 
 Calendar-based (Auto date/time) time intelligence, `TREATAS`, composite
 models, full DAX compatibility, calculated tables, and an arbitrary Power
@@ -266,8 +343,13 @@ npm install
 npm run dev
 ```
 
-Then either import a `.csv`/`.xlsx` file or click **Load Retail Dataset** to
-try the built-in sample.
+Open **Free Lab** and pick a card from the **Practice projects** gallery
+(Retail Modeling, DAX Playground, Power Query Cleaning, or Filter Context
+Lab) to start from a working example, or import a `.csv`/`.xlsx` file to
+bring your own data. Use **Export project**/**Import project** at any time
+to save your work as a portable `.bilab.json` file and restore it later or
+on another machine — see
+[`docs/PROJECT_BUNDLE.md`](./docs/PROJECT_BUNDLE.md).
 
 Click **Load Power Query Lab Dataset** to try Power Query on deliberately
 messy data (`Sales_Jan`/`Sales_Feb`/`Products`/`Customers_Dirty`). On
@@ -370,6 +452,9 @@ match.
 - [`docs/QUERY_VALIDATION.md`](./docs/QUERY_VALIDATION.md)
 - [`docs/WORKSPACE_INTEGRITY.md`](./docs/WORKSPACE_INTEGRITY.md)
 - [`docs/SEMANTIC_CONFORMANCE.md`](./docs/SEMANTIC_CONFORMANCE.md)
+- [`docs/PROJECT_BUNDLE.md`](./docs/PROJECT_BUNDLE.md)
+- [`docs/PERFORMANCE.md`](./docs/PERFORMANCE.md)
+- [`docs/E2E_TESTING.md`](./docs/E2E_TESTING.md)
 
 ## Scope guardrail
 

@@ -29,19 +29,29 @@ A learner progresses through executable cells that expose data modeling and anal
 ## Current supported scope
 
 The "Initial supported scope" below described the Sprint 1–2 starting point.
-Sprints 3–15 have since shipped well past it — calculated columns, measures,
+Sprints 3–16 have since shipped well past it — calculated columns, measures,
 CALCULATE, iterators/table expressions, classic time intelligence, advanced
 relationships (USERELATIONSHIP/CROSSFILTER), a Power Query transformation
 layer (Sprint 12, see docs/POWER_QUERY_RUNTIME.md), a lesson-based
 Learning System (Sprint 13, see docs/LEARNING_SYSTEM.md), advanced
 Applied Steps plus Direct Query Validation and multi-checkpoint lessons
 (Sprint 14, see docs/APPLIED_STEPS.md, docs/QUERY_VALIDATION.md and
-docs/LEARNING_SYSTEM.md), and workspace referential integrity plus the rest
+docs/LEARNING_SYSTEM.md), workspace referential integrity plus the rest
 of the essential DAX subset (Sprint 15, see docs/WORKSPACE_INTEGRITY.md,
-docs/EXPRESSION_ENGINE.md and docs/SEMANTIC_CONFORMANCE.md) all exist
-in-repo. Treat this list as scope history, not a current restriction —
-check ROADMAP.md for what has actually shipped before assuming something is
-out of scope.
+docs/EXPRESSION_ENGINE.md and docs/SEMANTIC_CONFORMANCE.md), and V1 release
+readiness — a portable project bundle format, Practice Projects, first-time
+UX, a measured performance profile, bundle-size reduction, error-state
+hardening and a release E2E suite (Sprint 16, see docs/PROJECT_BUNDLE.md,
+docs/PERFORMANCE.md and docs/E2E_TESTING.md) — all exist in-repo. Treat this
+list as scope history, not a current restriction — check ROADMAP.md for
+what has actually shipped before assuming something is out of scope.
+
+BI Notebook Lab reached its intended V1 shape at the end of Sprint 16: a
+browser-based Power BI practice sandbox with guided Exercises, a Free Lab
+for open experimentation, and no further roadmap phase queued by default.
+The next sprint should come from an observed limitation in actual use, not
+from a Power BI feature checklist — see ROADMAP.md's "Later, only if
+validated" list for the one evidence-gated candidate (Calculated Tables).
 
 Delivered:
 
@@ -81,6 +91,22 @@ Delivered:
   (no `power-bi-verified` claims yet) and with one documented known
   divergence (Sprint 15, see docs/SEMANTIC_CONFORMANCE.md; `npm run
   conformance`)
+- Portable project bundle (`.bilab.json`, schema version 1): export/import
+  an entire workspace with stable ids, atomic validate-before-write import
+  via `NotebookRuntime.importSnapshot`, and learner-readable failure
+  messages for every rejection class (Sprint 16, see
+  docs/PROJECT_BUNDLE.md)
+- Practice Projects: four code-owned starting templates (Retail Modeling,
+  DAX Playground, Power Query Cleaning, Filter Context Lab) shown in a Free
+  Lab gallery — free experimentation, never scored, and structurally
+  identical in pattern to a `LessonDefinition` (Sprint 16, see
+  `src/domain/practiceProject.ts`)
+- A measured performance profile at 1k/10k/50k/100k rows justifying the
+  100,000-row limit and the decision not to introduce Web Workers (Sprint
+  16, see docs/PERFORMANCE.md; `npm run benchmark`)
+- A release-level Playwright E2E suite covering first-time Free Lab
+  persistence and portable-project export/import (Sprint 16, see
+  docs/E2E_TESTING.md; `npm run test:e2e`)
 
 Still avoid (no roadmap phase has required these):
 
@@ -95,7 +121,8 @@ Still avoid (no roadmap phase has required these):
   boundary"; this is ROADMAP.md Phase 10, not yet started)
 - Calculated Tables / CALENDAR/CALENDARAUTO / SELECTCOLUMNS/ADDCOLUMNS/
   SUMMARIZE (evaluated as a Sprint 14 candidate and deliberately deferred —
-  see ROADMAP.md "Recommended Sprint 16")
+  see ROADMAP.md "Later, only if validated"; the one evidence-gated
+  candidate for a future sprint)
 - table-valued VAR, CALCULATETABLE, and full DAX blank-coercion semantics
   beyond what's implemented (Sprint 15 deliberately scoped VAR to
   scalar-only and left arithmetic's uniform blank-propagation behavior
@@ -107,6 +134,13 @@ Still avoid (no roadmap phase has required these):
 - authentication
 - billing
 - collaboration
+- Web Workers (Sprint 16's benchmark showed no operation approaching the
+  500ms–1s blocking-candidate threshold even at the 100,000-row limit — see
+  docs/PERFORMANCE.md. Revisit only with fresh profiling evidence, never on
+  architectural preference alone)
+- a lesson-authoring UI, a JSON/DSL lesson bundle format, or a remote lesson
+  registry (unchanged by Sprint 16's portable *project* bundle — see
+  docs/PROJECT_BUNDLE.md "What's still IndexedDB-only" for the distinction)
 
 ## Definition of done for a sprint
 

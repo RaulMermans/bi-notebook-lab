@@ -4,8 +4,30 @@ import type { Dataset } from '../domain/data'
 
 const notebookStore = createStore('bi-notebook-lab-notebooks', 'notebooks')
 const datasetStore = createStore('bi-notebook-lab-datasets', 'datasets')
+const projectMetaStore = createStore('bi-notebook-lab-project-meta', 'meta')
 
 const ACTIVE_NOTEBOOK_KEY = 'active-notebook'
+const ACTIVE_PROJECT_META_KEY = 'active-project-meta'
+
+/**
+ * Sprint 16 — the portable-bundle metadata (`projectId`/`createdAt`) that
+ * has no home on `NotebookDocument` itself. Kept separate so a bundle
+ * export can reuse a stable `createdAt`/`projectId` across repeated
+ * exports of the same Free Lab project rather than minting a fresh one
+ * every time (see docs/PROJECT_BUNDLE.md "Export determinism").
+ */
+export interface ProjectMeta {
+  projectId: string
+  createdAt: string
+}
+
+export async function saveProjectMeta(meta: ProjectMeta): Promise<void> {
+  await set(ACTIVE_PROJECT_META_KEY, meta, projectMetaStore)
+}
+
+export async function loadProjectMeta(): Promise<ProjectMeta | undefined> {
+  return get<ProjectMeta>(ACTIVE_PROJECT_META_KEY, projectMetaStore)
+}
 
 /**
  * Sprint 1 persists a single active notebook (metadata + cell order, not

@@ -10,6 +10,8 @@ import { resolveTableRef } from '../../runtime/model/modelRuntime'
 import { ContextFilterEditor } from '../context/ContextFilterEditor'
 import { ExpressionEditor } from './calculatedColumn/ExpressionEditor'
 import { MeasureTraceVisualizer } from './measure/MeasureTraceVisualizer'
+import { BlockedActionNotice } from '../common/BlockedActionNotice'
+import type { WorkspaceIntegrityIssue } from '../../runtime/integrity/types'
 
 interface MeasureCellCardProps {
   cell: MeasureCell
@@ -38,7 +40,7 @@ export function MeasureCellCard({ cell, model, datasets, onUpdate, onRemove }: M
   const [runDiagnostics, setRunDiagnostics] = useState<ExpressionDiagnostic[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [filters, setFilters] = useState<ColumnFilter[]>([])
-  const [removeWarning, setRemoveWarning] = useState<string | null>(null)
+  const [removeBlockers, setRemoveBlockers] = useState<WorkspaceIntegrityIssue[]>([])
 
   useEffect(() => {
     setDraftExpression(measure?.expression ?? '')
@@ -87,13 +89,7 @@ export function MeasureCellCard({ cell, model, datasets, onUpdate, onRemove }: M
 
   async function handleRemove() {
     const result = await onRemove()
-    if (!result.removed) {
-      setRemoveWarning(
-        result.blockers && result.blockers.length > 0
-          ? `Can't remove "${measureName}": ${result.blockers.map((b) => b.reason).join(' ')}`
-          : `Can't remove "${measureName}".`,
-      )
-    }
+    setRemoveBlockers(result.removed ? [] : (result.blockers ?? []))
   }
 
   return (
@@ -119,7 +115,7 @@ export function MeasureCellCard({ cell, model, datasets, onUpdate, onRemove }: M
           </div>
         </div>
 
-        {removeWarning && <p className="import-panel__error" role="alert">{removeWarning}</p>}
+        <BlockedActionNotice title={`Can't remove "${measureName}".`} blockers={removeBlockers} />
 
         <pre className="calculated-column-expression-preview">
           <code>{measure.expression}</code>

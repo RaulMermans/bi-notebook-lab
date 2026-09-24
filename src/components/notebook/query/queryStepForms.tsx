@@ -793,19 +793,19 @@ export function CustomColumnForm({ columns, onSubmit, onCancel }: FormProps) {
   const [outputName, setOutputName] = useState('Column')
   const [expression, setExpression] = useState('')
 
-  const diagnostic = useMemo(() => {
-    if (expression.trim() === '') return undefined
+  const diagnosticMessages = useMemo((): string[] => {
+    if (expression.trim() === '') return []
     try {
       const ast = parseExpression(expression)
       const { diagnostics } = bindExpression(ast, columns, 'preview')
-      return diagnostics.find((d) => d.severity === 'error')?.message
+      return diagnostics.filter((d) => d.severity === 'error').map((d) => d.message)
     } catch (err) {
-      if (err instanceof ExpressionLexError || err instanceof ExpressionParseError) return err.message
-      return 'Could not parse this expression.'
+      if (err instanceof ExpressionLexError || err instanceof ExpressionParseError) return [err.message]
+      return ['Could not parse this expression.']
     }
   }, [expression, columns])
 
-  const valid = outputName.trim() && expression.trim() !== '' && !diagnostic
+  const valid = outputName.trim() && expression.trim() !== '' && diagnosticMessages.length === 0
 
   return (
     <div className="query-form">
@@ -817,7 +817,13 @@ export function CustomColumnForm({ columns, onSubmit, onCancel }: FormProps) {
         value={expression}
         onChange={(e) => setExpression(e.target.value)}
       />
-      {diagnostic && <p className="query-form__error">{diagnostic}</p>}
+      {diagnosticMessages.length > 0 && (
+        <ul className="diagnostic-list">
+          {diagnosticMessages.map((message, index) => (
+            <li key={index} className="diagnostic diagnostic--error">{message}</li>
+          ))}
+        </ul>
+      )}
       <p className="query-form__hint">Power Query expression subset — not full M. See docs/POWER_QUERY_EXPRESSIONS.md.</p>
       <div className="query-form__actions">
         <button type="button" className="secondary-button" onClick={onCancel}>Cancel</button>

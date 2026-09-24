@@ -9,6 +9,8 @@ import { resolveTableRef } from '../../runtime/model/modelRuntime'
 import { CalculatedColumnPreview } from './calculatedColumn/CalculatedColumnPreview'
 import { ExpressionEditor } from './calculatedColumn/ExpressionEditor'
 import { RowContextVisualizer } from './calculatedColumn/RowContextVisualizer'
+import { BlockedActionNotice } from '../common/BlockedActionNotice'
+import type { WorkspaceIntegrityIssue } from '../../runtime/integrity/types'
 
 interface CalculatedColumnCellCardProps {
   cell: CalculatedColumnCell
@@ -34,7 +36,7 @@ export function CalculatedColumnCellCard({ cell, model, datasets, onUpdate, onRe
   const [runDiagnostics, setRunDiagnostics] = useState<ExpressionDiagnostic[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null)
-  const [removeWarning, setRemoveWarning] = useState<string | null>(null)
+  const [removeBlockers, setRemoveBlockers] = useState<WorkspaceIntegrityIssue[]>([])
 
   useEffect(() => {
     setDraftExpression(calculatedColumn?.expression ?? '')
@@ -79,13 +81,7 @@ export function CalculatedColumnCellCard({ cell, model, datasets, onUpdate, onRe
 
   async function handleRemove() {
     const result = await onRemove()
-    if (!result.removed) {
-      setRemoveWarning(
-        result.blockers && result.blockers.length > 0
-          ? `Can't remove "${columnName}": ${result.blockers.map((b) => b.reason).join(' ')}`
-          : `Can't remove "${columnName}".`,
-      )
-    }
+    setRemoveBlockers(result.removed ? [] : (result.blockers ?? []))
   }
 
   const selectedTrace =
@@ -118,7 +114,7 @@ export function CalculatedColumnCellCard({ cell, model, datasets, onUpdate, onRe
           </div>
         </div>
 
-        {removeWarning && <p className="import-panel__error" role="alert">{removeWarning}</p>}
+        <BlockedActionNotice title={`Can't remove "${columnName}".`} blockers={removeBlockers} />
 
         <pre className="calculated-column-expression-preview">
           <code>{calculatedColumn.expression}</code>

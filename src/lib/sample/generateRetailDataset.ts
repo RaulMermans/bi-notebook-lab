@@ -70,13 +70,25 @@ function buildDataset(key: string, name: string, table: ReturnType<typeof buildD
   }
 }
 
+export interface GenerateRetailDatasetOptions {
+  /**
+   * Sprint 16 performance benchmark hook (docs/PERFORMANCE.md) — lets the
+   * benchmark harness build the same deterministic Sales shape at 1k/10k/
+   * 50k/100k rows instead of a separate fixture generator. Defaults to the
+   * original fixed size so every existing caller (samples, lessons,
+   * practice projects, tests) is unaffected.
+   */
+  salesCount?: number
+}
+
 /**
  * Generates the built-in Retail Foundations dataset: Customers, Products,
  * Sales and Calendar tables sized and linked so Sprint 2+ exercises
  * (relationships, revenue, margin, time intelligence) have coherent data to
- * work with. Uses a seeded PRNG so the dataset is identical across runs.
+ * work with. Uses a seeded PRNG so the dataset is identical across runs for
+ * a given `salesCount`.
  */
-export function generateRetailDataset(): Dataset[] {
+export function generateRetailDataset(options: GenerateRetailDatasetOptions = {}): Dataset[] {
   const rng = mulberry32(SEED)
 
   const customerCount = 120
@@ -121,7 +133,7 @@ export function generateRetailDataset(): Dataset[] {
     rows: calendarRows,
   })
 
-  const salesCount = 1500
+  const salesCount = options.salesCount ?? 1500
   const salesRows = Array.from({ length: salesCount }, (_, index) => {
     const date = pick(rng, calendarDates)
     const customerId = randInt(rng, 1, customerCount)

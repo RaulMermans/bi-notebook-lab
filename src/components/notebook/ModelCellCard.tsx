@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import type { ModelCell } from '../../domain/notebook'
 import type { Dataset } from '../../domain/data'
 import type { ColumnRef, RelationshipDiagnostic, SemanticModel, TableRef } from '../../domain/model'
@@ -7,13 +7,16 @@ import { resolveColumnRef } from '../../runtime/model/modelRuntime'
 import type { RelationshipConfigInput } from '../../runtime/model/modelRuntime'
 import { validateModel } from '../../runtime/model/graphAnalysis'
 import { relationshipCardinalityLabel } from '../../lib/format/relationshipLabel'
-import { ContextExplorer } from '../context/ContextExplorer'
 import { DateTableControls } from './model/DateTableControls'
-import { ModelCanvas } from './model/ModelCanvas'
 import { ModelHealthSummary, modelHealthLabel } from './model/ModelHealthSummary'
 import { RelationshipEditPanel } from './model/RelationshipEditPanel'
 import { RelationshipForm } from './model/RelationshipForm'
 import { TableRegistrationPanel } from './model/TableRegistrationPanel'
+import { EmptyState } from '../common/EmptyState'
+
+/** Sprint 16 Part E — React Flow (`@xyflow/react`) stays out of the initial bundle until a model with tables is actually opened (brief §31). `ContextExplorer` also pulls in React Flow (`ContextPropagationDiagram`), so it is deferred too even though its tab starts hidden rather than unmounted. */
+const ModelCanvas = lazy(() => import('./model/ModelCanvas').then((m) => ({ default: m.ModelCanvas })))
+const ContextExplorer = lazy(() => import('../context/ContextExplorer').then((m) => ({ default: m.ContextExplorer })))
 
 type ModelCellView = 'model' | 'context'
 
@@ -139,10 +142,16 @@ export function ModelCellCard({
                 <TableRegistrationPanel model={model} datasets={datasets} onAddTable={onAddTable} />
               </section>
 
+              {model.tables.length === 0 && (
+                <EmptyState title="Add tables to begin building your semantic model" body="Register a table above, then connect tables with relationships." />
+              )}
+
               {model.tables.length > 0 && (
                 <section className="model-section">
                   <h3>Canvas</h3>
-                  <ModelCanvas model={model} datasets={datasets} onMoveTable={onMoveTable} />
+                  <Suspense fallback={<p className="cell__meta">Loading canvas…</p>}>
+                    <ModelCanvas model={model} datasets={datasets} onMoveTable={onMoveTable} />
+                  </Suspense>
                   <ul className="model-table-list">
                     {model.tables.map((table) => (
                       <li key={table.id}>
@@ -217,7 +226,9 @@ export function ModelCellCard({
 
             <div hidden={view !== 'context'}>
               <section className="model-section">
-                <ContextExplorer model={model} datasets={datasets} />
+                <Suspense fallback={<p className="cell__meta">Loading Context Explorer…</p>}>
+                  <ContextExplorer model={model} datasets={datasets} />
+                </Suspense>
               </section>
             </div>
           </div>

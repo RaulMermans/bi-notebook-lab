@@ -5,6 +5,8 @@ import type { RemovalResult } from '../../runtime/notebook/notebookRuntime'
 import { TablePreview } from './TablePreview'
 import { TableProfile } from './TableProfile'
 import { TableSchema } from './TableSchema'
+import { BlockedActionNotice } from '../common/BlockedActionNotice'
+import type { WorkspaceIntegrityIssue } from '../../runtime/integrity/types'
 
 type Tab = 'preview' | 'profile' | 'schema'
 const TABS: Tab[] = ['preview', 'profile', 'schema']
@@ -18,17 +20,11 @@ interface DataCellCardProps {
 
 export function DataCellCard({ cell, dataset, onRemove, onTransformData }: DataCellCardProps) {
   const [activeTab, setActiveTab] = useState<Tab | null>(null)
-  const [removeWarning, setRemoveWarning] = useState<string | null>(null)
+  const [removeBlockers, setRemoveBlockers] = useState<WorkspaceIntegrityIssue[]>([])
 
   async function handleRemove() {
     const result = await onRemove()
-    if (!result.removed) {
-      setRemoveWarning(
-        result.blockers && result.blockers.length > 0
-          ? `Can't remove this dataset: ${result.blockers.map((b) => b.reason).join(' ')}`
-          : "Can't remove this dataset.",
-      )
-    }
+    setRemoveBlockers(result.removed ? [] : (result.blockers ?? []))
   }
 
   if (!dataset) {
@@ -69,7 +65,7 @@ export function DataCellCard({ cell, dataset, onRemove, onTransformData }: DataC
           </div>
         </div>
 
-        {removeWarning && <p className="import-panel__error" role="alert">{removeWarning}</p>}
+        <BlockedActionNotice title="Can't remove this dataset." blockers={removeBlockers} />
 
         <ul className="column-summary">
           {table.columns.slice(0, 8).map((column) => (

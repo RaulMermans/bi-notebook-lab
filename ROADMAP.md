@@ -646,7 +646,7 @@ model, architecture, and persistence/staleness boundaries.
   operator uniformly, a pre-existing Sprint 3/4 behavior surfaced, not
   fixed, by this suite) reports via `it.skip`, never silently passed. Run
   with `npm run conformance`
-- 113 test files / 1005 tests (1004 passed + 1 skipped known-divergence),
+- 113 test files / 1012 tests (1011 passed + 1 skipped known-divergence),
   up from Sprint 14's 106 files / 857 tests — every pre-existing Sprint
   1-14 test remains green, zero rewritten to accommodate new behavior
 
@@ -664,7 +664,9 @@ expect. See [`docs/WORKSPACE_INTEGRITY.md`](./docs/WORKSPACE_INTEGRITY.md),
 
 ---
 
-## Recommended Sprint 16 — Practice UX, Performance & GitHub Release Readiness
+## Phase 12 — V1 Practice UX, Performance & GitHub Release Readiness ✅ complete
+
+> Referred to as "Sprint 16" in its own implementation brief.
 
 Phase 11 (Sprint 15) closed the two candidates this section previously
 weighed against each other — workspace mutations can no longer corrupt a
@@ -695,6 +697,58 @@ release rather than another engine-capability sprint:
 DAX table expressions rather than an import/query) **should displace this
 recommendation** — and only if real lesson use demonstrates it's actually
 blocking something important, not on feature-completeness grounds alone.
+
+**Delivered** (a breadth pass across every part of this sprint's brief, not
+a deep single-part sprint — see docs/PERFORMANCE.md, docs/PROJECT_BUNDLE.md
+and docs/E2E_TESTING.md for the full evidence and scoping notes):
+
+- **Portable project bundle** (`.bilab.json`, schema version 1) —
+  `src/domain/bundle.ts` + `src/runtime/bundle/bundleCodec.ts`: export/parse/
+  validate/migrate as separate pure functions, atomic validate-before-write
+  import via a new `NotebookRuntime.importSnapshot`, stable ids and export
+  determinism, learner-readable failure messages for every rejection class.
+  See [`docs/PROJECT_BUNDLE.md`](./docs/PROJECT_BUNDLE.md).
+- **Practice Projects** — a `practiceProject.ts` domain type mirroring
+  `LessonDefinition` exactly (data objects, one generic gallery component,
+  no JSON/DSL), four built-in templates (Retail Modeling, DAX Playground,
+  Power Query Cleaning, Filter Context Lab) in `src/data/practiceProjects/`,
+  shown in a new Free Lab empty-state gallery alongside Export/Import.
+- **First-time UX** — the dead unwired "Datasets" nav button removed, a
+  dismissible five-step onboarding panel, and a shared `EmptyState`
+  component applied to Context Explorer/Model/Query surfaces that
+  previously showed nothing or an inconsistent one-liner.
+- **Performance profiling** — `tests/performance/benchmark.ts`
+  (`npm run benchmark`) measures the real headless runtime entry points at
+  1k/10k/50k/100k rows. Result: every measured operation stays well under
+  250ms even at 100k rows, so the documented 100,000-row limit stands on
+  evidence and Web Workers were **not** introduced (no profiled operation
+  approaches the brief's own 500ms–1s gate). See
+  [`docs/PERFORMANCE.md`](./docs/PERFORMANCE.md).
+- **Bundle/build performance** — React Flow and Recharts moved behind
+  `React.lazy()` at their only usage sites, plus `vite.config.ts`
+  `manualChunks` pinning them (and xlsx) to their own vendor chunks. Main
+  entry chunk dropped from 1.15 MB/324 kB gzip to 425 kB/109 kB gzip — the
+  pre-existing `>500 kB` build warning is gone, not suppressed.
+- **UX/error-state hardening** — a top-level `ErrorBoundary`, a shared
+  `BlockedActionNotice` component replacing four duplicated ad hoc
+  delete-blocked banners, the Custom Column editor now shows every
+  diagnostic instead of only the first, and a real favicon closes out the
+  recurring 404 console noise.
+- **Release E2E suite** — Playwright, two real browser journeys (first-time
+  Free Lab with reload persistence; export → mutate → import → original
+  state restored), both passing with zero console errors. Three of the
+  brief's five candidate journeys were deliberately left at their existing
+  headless-integration-test coverage rather than duplicated in a browser —
+  see [`docs/E2E_TESTING.md`](./docs/E2E_TESTING.md) for the reasoning.
+- **GitHub showcase readiness** — README rewritten problem-first with a
+  feature matrix and an explicit semantic-honesty section, this test-count
+  discrepancy resolved from an actual run rather than a guess, and
+  AGENTS.md brought current.
+
+Not delivered this pass (explicitly out of scope per the brief, or
+deliberately deferred and named as such): a lesson-authoring UI/JSON bundle
+format, Web Workers (no evidence justified them), Journeys B/C/E as browser
+tests, and a captured screenshot/demo-GIF set.
 
 ---
 

@@ -11,6 +11,7 @@ import { ContextFlowNarrative } from './ContextFlowNarrative'
 import { ContextPropagationDiagram } from './ContextPropagationDiagram'
 import { MeasureDependencyTree } from './MeasureDependencyTree'
 import { RowVsFilterContextNote } from './RowVsFilterContextNote'
+import { EmptyState } from '../common/EmptyState'
 
 interface ContextExplorerProps {
   model: SemanticModel
@@ -42,7 +43,7 @@ export function ContextExplorer({ model, datasets }: ContextExplorerProps) {
   if (model.measures.length === 0) {
     return (
       <div className="context-explorer context-explorer--empty">
-        <p>Create a measure first to explore filter context.</p>
+        <EmptyState title="Create a measure first" body="Once this model has a measure, Context Explorer shows exactly how filters propagate to it." />
       </div>
     )
   }

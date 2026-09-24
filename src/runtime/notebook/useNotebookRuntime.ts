@@ -4,16 +4,22 @@ import type { Dataset } from '../../domain/data'
 import type { ColumnRef, TableRef } from '../../domain/model'
 import type { ValidationSpec } from '../../domain/validation'
 import type { VisualSpec } from '../../domain/visual'
-import { deleteDataset, loadDatasets, loadNotebook, saveDataset, saveNotebook } from '../../persistence/notebookStore'
+import { deleteDataset, loadDatasets, loadNotebook, loadProjectMeta, saveDataset, saveNotebook, saveProjectMeta } from '../../persistence/notebookStore'
 import { deleteModel, loadModels, saveModel } from '../../persistence/modelStore'
 import { deleteQuery as deleteQueryRecord, loadQueries, saveQuery } from '../../persistence/queryStore'
 import type { CalculatedColumnInput } from '../calculatedColumn/calculatedColumnRuntime'
 import type { MeasureInput } from '../measure/measureRuntime'
 import type { RelationshipConfigInput } from '../model/modelRuntime'
 import type { NewStepInput } from '../query/queryStepFactory'
+import type { BiLabProjectBundle } from '../../domain/bundle'
+import type { PracticeProjectInitialState } from '../../domain/practiceProject'
+import { exportProjectBundle, loadProjectBundle } from '../bundle/bundleCodec'
+import type { BundleLoadError } from '../bundle/bundleCodec'
 import type { NotebookRuntimeSnapshot } from './notebookRuntime'
 import type { DeleteQueryResult, RemovalResult, RemoveModelResult, RemoveModelTableResult, UpdateResult } from './notebookRuntime'
 import { NotebookRuntime, emptyNotebook } from './notebookRuntime'
+
+export type ImportProjectResult = { imported: true } | { imported: false; error: BundleLoadError }
 
 export type HydrationStatus = 'loading' | 'ready'
 
@@ -58,11 +64,11 @@ export type InitialNotebookSnapshot = Pick<NotebookRuntimeSnapshot, 'notebook' |
 export function useNotebookRuntime(options: UseNotebookRuntimeOptions = {}) {
   const persistence = options.persistence ?? freeLabPersistence
   const createInitialSnapshot: () => InitialNotebookSnapshot =
-    options.createInitialSnapshot ?? (() => ({ notebook: emptyNotebook('Retail Foundations'), datasets: {}, models: {} }))
+    options.createInitialSnapshot ?? (() => ({ notebook: emptyNotebook('Free Lab'), datasets: {}, models: {} }))
 
   const runtimeRef = useRef<NotebookRuntime | null>(null)
   if (!runtimeRef.current) {
-    runtimeRef.current = new NotebookRuntime({ notebook: emptyNotebook('Retail Foundations'), datasets: {}, models: {}, queries: {}, queryEvaluations: {} })
+    runtimeRef.current = new NotebookRuntime({ notebook: emptyNotebook('Free Lab'), datasets: {}, models: {}, queries: {}, queryEvaluations: {} })
   }
   const runtime = runtimeRef.current
 
@@ -307,6 +313,75 @@ export function useNotebookRuntime(options: UseNotebookRuntimeOptions = {}) {
         const result = runtime.deleteQuery(queryId)
         if (result.deleted) await deleteQueryRecord(queryId)
         return result
+      },
+      /**
+       * Builds a portable `.bilab.json` bundle from the live snapshot (brief
+       * Part A §8). Reuses a stable `projectId`/`createdAt` across repeated
+       * exports of the same project rather than minting a fresh one every
+       * click, so unchanged-project round-trips stay semantically equal
+       * (brief §7) — the only field expected to differ is `exportedAt`.
+       */
+      async exportProject(title: string, description?: string): Promise<BiLabProjectBundle> {
+        let meta = await loadProjectMeta()
+        if (!meta) {
+          meta = { projectId: runtime.getSnapshot().notebook.id, createdAt: new Date().toISOString() }
+          await saveProjectMeta(meta)
+        }
+        return exportProjectBundle(runtime.getSnapshot(), {
+          projectId: meta.projectId,
+          createdAt: meta.createdAt,
+          title,
+          description,
+        })
+      },
+      /**
+       * Atomic import (brief Part A §5): `loadProjectBundle` is pure and
+       * validates fully — parse, structural shape, schema version, and
+       * workspace integrity — before this ever touches IndexedDB. Only once
+       * that succeeds does it persist every entity and swap the live
+       * runtime snapshot; nothing is written if any check fails, so a
+       * rejected import leaves the current workspace untouched. Always
+       * replaces the whole workspace ("import as new project" — brief §6
+       * explicitly rules out merging into the current one).
+       */
+      async importProject(bundleText: string): Promise<ImportProjectResult> {
+        const result = loadProjectBundle(bundleText)
+        if (!result.ok) return { imported: false, error: result.error }
+
+        const { bundle, snapshot } = result
+        await Promise.all([
+          ...bundle.datasets.map((dataset) => saveDataset(dataset)),
+          ...Object.values(snapshot.models).map((model) => saveModel(model)),
+          ...bundle.queries.map((query) => saveQuery(query)),
+          persistence.save(snapshot.notebook),
+          saveProjectMeta({ projectId: bundle.metadata.projectId, createdAt: bundle.metadata.createdAt }),
+        ])
+
+        const outcome = runtime.importSnapshot(snapshot)
+        return outcome.imported ? { imported: true } : { imported: false, error: { code: 'integrity-violation', issues: outcome.report.issues, message: 'Import failed unexpectedly.' } }
+      },
+      /**
+       * Loads a code-owned Practice Project template into the active Free
+       * Lab workspace (brief Part B §11) — the same
+       * validate-then-swap-then-persist shape as `importProject`, minus the
+       * file-parsing step. Every call to a template's `initialize()`
+       * mints fresh ids (`generateId`), so starting the same template twice
+       * never shares state with a previous attempt (brief §13 "Template
+       * Isolation").
+       */
+      async startPracticeProject(initial: PracticeProjectInitialState): Promise<{ started: boolean }> {
+        const queries = initial.queries ?? {}
+        const outcome = runtime.importSnapshot({ notebook: initial.notebook, datasets: initial.datasets, models: initial.models, queries, queryEvaluations: {} })
+        if (!outcome.imported) return { started: false }
+
+        runtime.refreshQueries()
+        await Promise.all([
+          ...Object.values(initial.datasets).map((dataset) => saveDataset(dataset)),
+          ...Object.values(initial.models).map((model) => saveModel(model)),
+          ...Object.values(queries).map((query) => saveQuery(query)),
+          persistence.save(initial.notebook),
+        ])
+        return { started: true }
       },
     }),
     [runtime],

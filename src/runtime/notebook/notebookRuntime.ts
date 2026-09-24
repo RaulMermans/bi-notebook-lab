@@ -25,7 +25,8 @@ import {
   analyzeDisableQueryLoad,
   analyzeRemoveModelTable,
 } from '../integrity/mutationImpact'
-import type { WorkspaceIntegrityIssue } from '../integrity/types'
+import { validateWorkspaceIntegrity } from '../integrity/workspaceIntegrity'
+import type { WorkspaceIntegrityIssue, WorkspaceIntegrityReport } from '../integrity/types'
 
 export interface NotebookRuntimeSnapshot {
   notebook: NotebookDocument
@@ -48,6 +49,8 @@ export interface DeleteQueryResult {
    * list means `deleted` is `false`, not just informational.
    */
   referencedByModels: string[]
+  /** The full, learner-readable blockers behind the two id lists above — Sprint 16's `BlockedActionNotice` renders these directly instead of a hand-built count message. */
+  blockers: WorkspaceIntegrityIssue[]
 }
 
 export interface RemovalResult {
@@ -146,6 +149,23 @@ export class NotebookRuntime {
   replaceAll(next: NotebookRuntimeSnapshot): void {
     this.snapshot = next
     this.listeners.forEach((listener) => listener())
+  }
+
+  /**
+   * The validating counterpart to `replaceAll` — the enforcement point for
+   * Sprint 16's portable project import (brief Part A §4 "Validation Before
+   * Import"). Unlike `replaceAll` (trusted for hydration from IndexedDB,
+   * which was already validated when it was written), this never swaps
+   * state unless `validateWorkspaceIntegrity` reports the incoming snapshot
+   * clean — the same "never import a structurally invalid workspace" rule
+   * every other destructive mutation in this class already enforces via
+   * `mutationImpact.ts`.
+   */
+  importSnapshot(next: NotebookRuntimeSnapshot): { imported: boolean; report: WorkspaceIntegrityReport } {
+    const report = validateWorkspaceIntegrity(next)
+    if (!report.valid) return { imported: false, report }
+    this.replaceAll(next)
+    return { imported: true, report }
   }
 
   renameNotebook(title: string): void {
@@ -344,14 +364,14 @@ export class NotebookRuntime {
    */
   deleteQuery(queryId: string): DeleteQueryResult {
     const query = this.getQuery(queryId)
-    if (!query) return { deleted: false, blockedByQueries: [], referencedByModels: [] }
+    if (!query) return { deleted: false, blockedByQueries: [], referencedByModels: [], blockers: [] }
 
     const impact = analyzeDeleteQuery(this.snapshot, queryId)
     const blockedByQueries = impact.blockers.filter((b) => b.referenceType === 'QUERY_IN_USE_BY_QUERY').map((b) => b.source.id)
     const referencedByModels = impact.blockers.filter((b) => b.referenceType === 'QUERY_IN_USE_BY_MODEL').map((b) => b.source.id)
 
     if (!impact.allowed) {
-      return { deleted: false, blockedByQueries, referencedByModels }
+      return { deleted: false, blockedByQueries, referencedByModels, blockers: impact.blockers }
     }
 
     const queries = { ...this.snapshot.queries }
@@ -363,7 +383,7 @@ export class NotebookRuntime {
     delete datasets[query.outputDatasetId]
     this.commit(this.snapshot.notebook, datasets, this.snapshot.models, this.snapshot.queries, this.snapshot.queryEvaluations)
 
-    return { deleted: true, blockedByQueries: [], referencedByModels: [] }
+    return { deleted: true, blockedByQueries: [], referencedByModels: [], blockers: [] }
   }
 
   getModel(modelId: string): SemanticModel | undefined {

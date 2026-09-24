@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { NotebookWorkspace } from './components/NotebookWorkspace'
-import { LessonCatalog } from './components/learning/LessonCatalog'
-import { LessonWorkspace } from './components/learning/LessonWorkspace'
-import { ProgressDashboard } from './components/learning/ProgressDashboard'
 import { getBuiltInLesson } from './data/lessons/lessonRegistry'
 import './styles/app.css'
+
+/** Sprint 16 Part E — Exercises/Progress are not needed on first paint of Free Lab (the default view), so they load on demand (brief §31). */
+const LessonCatalog = lazy(() => import('./components/learning/LessonCatalog').then((m) => ({ default: m.LessonCatalog })))
+const LessonWorkspace = lazy(() => import('./components/learning/LessonWorkspace').then((m) => ({ default: m.LessonWorkspace })))
+const ProgressDashboard = lazy(() => import('./components/learning/ProgressDashboard').then((m) => ({ default: m.ProgressDashboard })))
 
 type AppView = 'notebook' | 'exercises' | 'progress'
 
@@ -34,9 +36,8 @@ export default function App() {
         <div className="brand">BI NOTEBOOK LAB</div>
         <nav>
           <button className={`nav-item${view === 'notebook' ? ' nav-item--active' : ''}`} onClick={() => goTo('notebook')}>
-            Notebook
+            Free Lab
           </button>
-          <button className="nav-item">Datasets</button>
           <button className={`nav-item${view === 'exercises' ? ' nav-item--active' : ''}`} onClick={() => goTo('exercises')}>
             Exercises
           </button>
@@ -47,9 +48,16 @@ export default function App() {
       </aside>
 
       {view === 'notebook' && <NotebookWorkspace />}
-      {view === 'exercises' &&
-        (activeLesson ? <LessonWorkspace key={activeLesson.definition.id} lesson={activeLesson} onExit={exitLesson} /> : <LessonCatalog onOpenLesson={openLesson} />)}
-      {view === 'progress' && <ProgressDashboard />}
+      {view === 'exercises' && (
+        <Suspense fallback={<p className="workspace__status">Loading…</p>}>
+          {activeLesson ? <LessonWorkspace key={activeLesson.definition.id} lesson={activeLesson} onExit={exitLesson} /> : <LessonCatalog onOpenLesson={openLesson} />}
+        </Suspense>
+      )}
+      {view === 'progress' && (
+        <Suspense fallback={<p className="workspace__status">Loading…</p>}>
+          <ProgressDashboard />
+        </Suspense>
+      )}
     </main>
   )
 }

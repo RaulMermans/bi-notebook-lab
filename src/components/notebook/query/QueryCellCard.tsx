@@ -4,7 +4,7 @@ import type { Dataset } from '../../../domain/data'
 import type { QueryDefinition, QueryStep, QueryStepKind } from '../../../domain/query'
 import { frameAtStep, resolveSourceColumns, type QueryEvaluationDetail } from '../../../runtime/query/queryRuntime'
 import type { NewStepInput } from '../../../runtime/query/queryStepFactory'
-import type { UpdateResult } from '../../../runtime/notebook/notebookRuntime'
+import type { DeleteQueryResult, UpdateResult } from '../../../runtime/notebook/notebookRuntime'
 import {
   AppendQueriesForm,
   ChangeTypeForm,
@@ -26,6 +26,9 @@ import {
   SplitColumnForm,
   UnpivotColumnsForm,
 } from './queryStepForms'
+import { EmptyState } from '../../common/EmptyState'
+import { BlockedActionNotice } from '../../common/BlockedActionNotice'
+import type { WorkspaceIntegrityIssue } from '../../../runtime/integrity/types'
 
 const PREVIEW_ROW_LIMIT = 500
 
@@ -42,7 +45,7 @@ interface QueryCellCardProps {
   onRemoveStep: (stepId: string) => void
   onMoveStep: (stepId: string, toIndex: number) => void
   onSetLoadEnabled: (loadEnabled: boolean) => Promise<UpdateResult>
-  onRemove: () => Promise<{ deleted: boolean; blockedByQueries: string[]; referencedByModels: string[] }>
+  onRemove: () => Promise<DeleteQueryResult>
 }
 
 const TOOLBAR_KINDS: { kind: QueryStepKind; label: string }[] = [
@@ -99,7 +102,7 @@ export function QueryCellCard({
   const [selectedStepIndex, setSelectedStepIndex] = useState<number | null>(null)
   const [activeToolbarKind, setActiveToolbarKind] = useState<QueryStepKind | null>(null)
   const [nameDraft, setNameDraft] = useState<string | null>(null)
-  const [deleteWarning, setDeleteWarning] = useState<string | null>(null)
+  const [deleteBlockers, setDeleteBlockers] = useState<WorkspaceIntegrityIssue[]>([])
 
   const otherQueries = useMemo(() => {
     if (!query) return []
@@ -137,20 +140,12 @@ export function QueryCellCard({
 
   async function handleRemove() {
     const result = await onRemove()
-    if (!result.deleted) {
-      if (result.blockedByQueries.length > 0) {
-        setDeleteWarning(`Can't delete: ${result.blockedByQueries.length} other quer${result.blockedByQueries.length === 1 ? 'y' : 'ies'} still reference this one.`)
-      } else if (result.referencedByModels.length > 0) {
-        setDeleteWarning(`Can't delete: ${result.referencedByModels.length} model${result.referencedByModels.length === 1 ? '' : 's'} still use this query's output.`)
-      } else {
-        setDeleteWarning("Can't delete this query.")
-      }
-    }
+    setDeleteBlockers(result.deleted ? [] : result.blockers)
   }
 
   async function handleSetLoadEnabled(loadEnabled: boolean) {
     const result = await onSetLoadEnabled(loadEnabled)
-    setDeleteWarning(result.updated ? null : "Can't disable load: this query's output is used by a model.")
+    setDeleteBlockers(result.updated ? [] : (result.blockers ?? []))
   }
 
   return (
@@ -187,7 +182,7 @@ export function QueryCellCard({
           </div>
         </div>
 
-        {deleteWarning && <p className="import-panel__error" role="alert">{deleteWarning}</p>}
+        <BlockedActionNotice title={`Can't change "${query.name}".`} blockers={deleteBlockers} />
 
         <div className="query-layout">
           <ol className="query-steps">
@@ -262,6 +257,8 @@ export function QueryCellCard({
             )}
           </div>
         </div>
+
+        {stepCount === 0 && <EmptyState title="No Applied Steps yet" body="Choose a transformation below to start shaping this query's output." />}
 
         <div className="query-toolbar">
           {TOOLBAR_KINDS.map((t) => (
