@@ -49,10 +49,9 @@ candidate.
 | Validation | Full Retail checkpoint | 2.4 | 4.6 | 12.2 | 11.6 |
 | Validation | Query checkpoint | 0.2 | 0.1 | 0.1 | 0.1 |
 
-**0 of 17 measured operations exceeded even the 100ms "immediate" bucket at
-the 100,000-row supported limit; the slowest (`RELATED` calculated column at
-100k) was 243.7ms — still "acceptable", nowhere near the 500ms–1s
-"noticeable" band, let alone the 1s "blocking candidate" threshold.**
+**0 of 17 measured operations reached the 1s "blocking candidate" threshold, or even the 500ms–1s "noticeable" band, at the 100,000-row supported limit. Most stayed in the <100ms "immediate" bucket; the slowest (`RELATED` calculated column at 100k) was 243.7ms, which is "acceptable".**
+
+> Correction (README evidence pass): an earlier version of this sentence said no operation exceeded 100ms, which contradicted the table above. Re-running the harness on a different machine gave the same shape: all 17 operations were under 1s, and the slowest was about 250ms at 100k rows.
 
 Power Query's Merge and Append steps were not included in this run (each
 needs a second full-size query as its right-hand side, which would roughly
