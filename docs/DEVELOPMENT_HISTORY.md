@@ -1,5 +1,7 @@
 # Development history
 
+> Development context: built with AI-assisted development. Product scope, architecture, acceptance criteria and verification were human-directed, and earlier commits carry the assistant's tool identity as their author.
+
 > Moved from the README to keep the landing page focused. This is the sprint-by-sprint record of what the runtime contains.
 
 ## Repository status (as of Sprint 16)

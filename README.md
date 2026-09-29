@@ -49,7 +49,7 @@ More detail: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · [`docs/EXPRESSION_ENGINE.
 
 ## Evidence
 
-Measured on the current `main` with `npm test`, `npm run conformance`, `npm run typecheck`, `npm run build` and `npm run benchmark`:
+Measured on the default branch (`master`) with `npm test`, `npm run conformance`, `npm run typecheck`, `npm run build` and `npm run benchmark`:
 
 | Check | Result |
 | --- | --- |
