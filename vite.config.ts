@@ -2,6 +2,9 @@ import { configDefaults, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 export default defineConfig({
+  // GitHub Pages serves the app from /bi-notebook-lab/; local dev, preview and
+  // the Playwright suite keep the root base. Set by .github/workflows/pages.yml.
+  base: process.env.BI_LAB_BASE ?? '/',
   plugins: [react()],
   build: {
     rollupOptions: {

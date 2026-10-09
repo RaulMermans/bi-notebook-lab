@@ -1,0 +1,52 @@
+name: DAX divergence
+description: The runtime returns something different from real Power BI
+title: "Divergence: "
+labels: ["semantic-divergence"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. These reports are the most useful thing anyone can send. A minimal model and the exact numbers are enough; you don't need to know the codebase.
+  - type: textarea
+    id: expression
+    attributes:
+      label: DAX expression
+      description: The measure or calculated column, exactly as written.
+      render: dax
+    validations:
+      required: true
+  - type: textarea
+    id: model
+    attributes:
+      label: Model and filter context
+      description: Tables, relationships (cardinality, direction, active/inactive), and any slicer or filter applied. A practice project name (e.g. "Filter Context Lab") is fine.
+    validations:
+      required: true
+  - type: input
+    id: actual
+    attributes:
+      label: What BI Notebook Lab returns
+    validations:
+      required: true
+  - type: input
+    id: expected
+    attributes:
+      label: What Power BI returns
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: How do you know?
+      options:
+        - Ran it in Power BI Desktop / Service
+        - Microsoft documentation (link below)
+        - DAX Guide / SQLBI article (link below)
+        - Reasoning from DAX semantics
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Screenshot, documentation link or explanation.
