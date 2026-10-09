@@ -6,6 +6,8 @@
 
 A browser-based Power BI learning lab with a real expression engine, semantic models, filter context and execution-based exercises. Write a measure, add a slicer, and trace exactly which rows survived and why.
 
+**[▶ Live Demo](https://raulmermans.github.io/bi-notebook-lab/)** · [Run locally](#run-locally) · [Release notes](./CHANGELOG.md) · [Contribute](./CONTRIBUTING.md) · [Report a DAX disagreement](https://github.com/RaulMermans/bi-notebook-lab/issues/new?template=dax-divergence.yml)
+
 [![CI](https://github.com/RaulMermans/bi-notebook-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/RaulMermans/bi-notebook-lab/actions/workflows/ci.yml)
 ![Status: V1](https://img.shields.io/badge/status-V1-2f6f4f)
 ![DAX conformance: 82/83 hand-verified](https://img.shields.io/badge/DAX%20conformance-82%2F83%20hand--verified-2f6f4f)
@@ -17,7 +19,9 @@ A browser-based Power BI learning lab with a real expression engine, semantic mo
 
 </div>
 
-**Try it in under a minute** (Node.js 20+, no account, no backend, nothing leaves your browser):
+**Try it in the browser:** [raulmermans.github.io/bi-notebook-lab](https://raulmermans.github.io/bi-notebook-lab/) → Free Lab → "Filter Context Lab". Nothing leaves your browser: projects are stored locally in IndexedDB.
+
+**Or run it locally** (Node.js 20+, no account, no backend):
 
 ```bash
 git clone https://github.com/RaulMermans/bi-notebook-lab && cd bi-notebook-lab
