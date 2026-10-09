@@ -1,0 +1,21 @@
+name: Bug
+description: Something breaks, crashes or renders wrongly (not a DAX semantics question)
+labels: ["bug"]
+body:
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Starting from Free Lab or a named exercise.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected vs actual
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Browser and OS

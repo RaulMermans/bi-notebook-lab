@@ -2,19 +2,37 @@
 
 # BI Notebook Lab
 
-**A browser-based lab for learning how BI semantic models actually compute.**
+**Learn how DAX actually evaluates.**
 
-It covers a bounded, educational subset of Power BI concepts (Power Query, star schemas, DAX, filter context), with a real expression engine behind every cell and automatic grading of what you build.
+A browser-based Power BI learning lab with a real expression engine, semantic models, filter context and execution-based exercises. Write a measure, add a slicer, and trace exactly which rows survived and why.
 
 [![CI](https://github.com/RaulMermans/bi-notebook-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/RaulMermans/bi-notebook-lab/actions/workflows/ci.yml)
-![Status: V1 complete](https://img.shields.io/badge/status-V1%20complete-2f6f4f)
+![Status: V1](https://img.shields.io/badge/status-V1-2f6f4f)
+![DAX conformance: 82/83 hand-verified](https://img.shields.io/badge/DAX%20conformance-82%2F83%20hand--verified-2f6f4f)
 ![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)
 
-![Semantic model: star schema canvas with relationships](docs/screenshots/semantic-model.png)
+![Context Explorer: filter propagation and measure dependency trace](docs/screenshots/context-explorer.png)
+
+<sub>Context Explorer: pick a measure, add a filter, and follow it through the relationships down to the rows that were evaluated. Built-in synthetic sample data.</sub>
 
 </div>
 
+**Try it in under a minute** (Node.js 20+, no account, no backend, nothing leaves your browser):
+
+```bash
+git clone https://github.com/RaulMermans/bi-notebook-lab && cd bi-notebook-lab
+npm install && npm run dev    # open http://localhost:5173 → Free Lab → "Filter Context Lab"
+```
+
+| What you get | Evidence |
+| --- | --- |
+| One lexer → parser → binder → evaluator behind every calculated column, measure, visual and grader | 1,024 passing tests, `tsc` clean ([Evidence](#evidence)) |
+| `CALCULATE`, iterators, time intelligence, 1:\*/1:1/\*:\* and bidirectional relationships, `USERELATIONSHIP`/`CROSSFILTER` | 82 of 83 hand-verified DAX conformance cases pass |
+| Exercises graded by **running** your model under several filter contexts, not by matching strings | [`docs/VALIDATION_ENGINE.md`](./docs/VALIDATION_ENGINE.md) |
+
 > **Not a Power BI replacement.** BI Notebook Lab implements a deliberately bounded subset of Power BI semantics to teach the mental model. Where it diverges from real DAX, the divergence is documented and tested. See [Semantic honesty](#semantic-honesty).
+
+> **Found a case where it disagrees with real Power BI?** That is the most useful thing you can report. [Open a DAX divergence report](https://github.com/RaulMermans/bi-notebook-lab/issues/new?template=dax-divergence.yml) with the expression, the model shape and what Power BI returns. Contributions start at [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## What it solves
 
@@ -57,16 +75,16 @@ Measured on the default branch (`master`) with `npm test`, `npm run conformance`
 | DAX semantic conformance | **82 of 83** hand-verified cases pass. The 1 skipped case is the documented divergence above. |
 | Type checking | `tsc -b` clean |
 | Production build | Passes |
-| End-to-end (Playwright) | 2 user journeys: first-time Free Lab, and portable project export/import |
-| Performance harness | 17 runtime operations at 1k / 10k / 50k / 100k rows. None exceeded 1 s; the slowest is about 250 ms at 100k rows. |
+| End-to-end (Playwright) | 2 of 2 user journeys pass: first-time Free Lab, and portable project export/import |
+| Performance harness | 17 runtime operations at 1k / 10k / 50k / 100k rows. None exceeded 1 s; the slowest recorded in [`docs/PERFORMANCE.md`](./docs/PERFORMANCE.md) is about 250 ms at 100k rows. |
 
-Performance figures come from Node/V8, not a browser tab under UI load, so the shape of the result matters more than the exact milliseconds. See [`docs/PERFORMANCE.md`](./docs/PERFORMANCE.md).
+Performance figures come from Node/V8, not a browser tab under UI load, and vary by machine, so the shape of the result matters more than the exact milliseconds. CI runs typecheck, the unit/integration suite (which includes conformance) and the build on every push; the Playwright and benchmark suites run locally. Release-time results are recorded in [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## Screenshots
 
-**Context Explorer.** Choose a measure, add a filter, and see how it propagates through relationships, step by step, down to the rows that were evaluated.
+**Semantic model.** A star schema on a canvas, with relationship validation against the real row data.
 
-![Context Explorer: filter propagation and measure dependency trace](docs/screenshots/context-explorer.png)
+![Semantic model: star schema canvas with relationships](docs/screenshots/semantic-model.png)
 
 | Measures over the semantic model | Visuals on the same measure runtime |
 | --- | --- |
@@ -157,8 +175,13 @@ npm run test:e2e     # Playwright journeys
 
 Start from a practice project in **Free Lab** (Retail Modeling, DAX Playground, Power Query Cleaning or Filter Context Lab), or import your own CSV/Excel. A step-by-step tour is in [`docs/WALKTHROUGH.md`](./docs/WALKTHROUGH.md).
 
+## Contributing
+
+The highest-value contributions are DAX conformance cases (especially ones checked against real Power BI), filter-propagation edge cases, and divergence reports. Start with [`CONTRIBUTING.md`](./CONTRIBUTING.md) and the issues labelled [`good first issue`](https://github.com/RaulMermans/bi-notebook-lab/labels/good%20first%20issue).
+
 ## Documentation
 
+- [`CHANGELOG.md`](./CHANGELOG.md): v1.0.0 release notes
 - [`PRODUCT.md`](./PRODUCT.md)
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md)
 - [`ROADMAP.md`](./ROADMAP.md)
