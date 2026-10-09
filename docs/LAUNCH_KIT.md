@@ -6,7 +6,7 @@ Links used below:
 
 - Repo: https://github.com/RaulMermans/bi-notebook-lab
 - Divergence report: https://github.com/RaulMermans/bi-notebook-lab/issues/new?template=dax-divergence.yml
-- Live demo: add once GitHub Pages is enabled and verified (see the PR notes). Until then, the run command is the demo.
+- Live demo: https://raulmermans.github.io/bi-notebook-lab/
 
 ## A. LinkedIn
 
